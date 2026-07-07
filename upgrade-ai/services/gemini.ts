@@ -11,10 +11,11 @@ const FALLBACK_MODELS = [
   "gemini-2.0-flash"
 ];
 
-// הפונקציה עכשיו מחזירה אובייקט עם הטקסט, ואופציונלית את שם המודל החדש
+// הפונקציה עכשיו מקבלת גם את הכללים מהאתר כפרמטר נוסף
 export async function askGemini(
   prompt: string, 
   history: ChatMessage[] = [], 
+  systemRules: string = "", // <-- התוספת שלנו מ-page.tsx
   modelIndex = 0
 ): Promise<{ text: string; fallbackModelName?: string }> {
   
@@ -33,9 +34,13 @@ export async function askGemini(
     const genAI = new GoogleGenerativeAI(apiKey);
     const today = new Date();
     
+    // שילוב ההוראה הקבועה שלך יחד עם הכללים שהמשתמש מקליד באתר
+    const baseInstruction = `התאריך של היום הוא ${today.toLocaleDateString('he-IL')} והשעה היא ${today.toLocaleTimeString('he-IL')}. אתה מומחה לפיתוח תוכנה ב-React ו-Next.js.`;
+    const finalInstruction = systemRules ? `${baseInstruction}\n\n${systemRules}` : baseInstruction;
+
     const model = genAI.getGenerativeModel({ 
       model: currentModelName,
-      systemInstruction: `התאריך של היום הוא ${today.toLocaleDateString('he-IL')} והשעה היא ${today.toLocaleTimeString('he-IL')}. אתה מומחה לפיתוח תוכנה ב-React ו-Next.js.`
+      systemInstruction: finalInstruction // כאן ה-AI מקבל את ההנחיות המשולבות
     });
 
     let safeHistory = [...history];
@@ -60,12 +65,14 @@ export async function askGemini(
     
   } catch (error: any) {
     const errorMessage = error?.message?.toLowerCase() || "";
-    const isQuotaError = errorMessage.includes("429") || errorMessage.includes("quota") || errorMessage.includes("exhausted");
+    // הוספתי גם את 503 למקרה של עומס בשרתי גוגל
+    const isQuotaError = errorMessage.includes("429") || errorMessage.includes("503") || errorMessage.includes("quota") || errorMessage.includes("exhausted");
 
     // אם נגמרה המכסה, נפעיל את הפונקציה שוב (רקורסיה) עם המודל הבא בתור
     if (isQuotaError && modelIndex < FALLBACK_MODELS.length - 1) {
-      console.warn(`מכסת ${currentModelName} הסתיימה, עובר למודל הבא ברשימה...`);
-      return await askGemini(prompt, history, modelIndex + 1);
+      console.warn(`מכסת ${currentModelName} הסתיימה או שיש עומס, עובר למודל הבא ברשימה...`);
+      // חובה להעביר את systemRules הלאה כדי שהגיבוי גם יקבל את הכללים
+      return await askGemini(prompt, history, systemRules, modelIndex + 1);
     }
 
     console.error("Gemini API Error:", error);
