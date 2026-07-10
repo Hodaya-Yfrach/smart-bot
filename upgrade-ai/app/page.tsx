@@ -39,6 +39,9 @@ export default function Home() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [currentModelName, setCurrentModelName] = useState('Gemini (ראשי)');
 
+  // בדיקה אם האורח ניצל את השאלה היחידה שלו
+  const guestLimitReached = isGuest && mainMessages.some(msg => msg.role === 'user');
+
   // --- Effects ---
   useEffect(() => {
     const checkUser = async () => {
@@ -198,6 +201,12 @@ export default function Home() {
 
   // --- שליחת הודעה בצ'אט ---
   const handleMainSend = async () => {
+    // הגבלת אורח
+    if (guestLimitReached) {
+      alert("אורחים יכולים לשאול רק שאלה אחת. כדי להמשיך, אנא התחברו או צרו פרופיל חדש 💙");
+      return;
+    }
+
     if (!input.trim() || isWaiting) return;
 
     const userText = input;
@@ -393,19 +402,24 @@ export default function Home() {
         <div className="bg-[#f0f2f5] p-3 md:p-4 border-t border-gray-200 flex flex-col items-center">
           <div className="w-full max-w-3xl flex gap-3 mb-2">
             <input 
-              className="flex-1 p-3 bg-white border-none rounded-xl focus:outline-none focus:ring-1 focus:ring-gray-300 shadow-sm text-base disabled:opacity-50"
+              className="flex-1 p-3 bg-white border-none rounded-xl focus:outline-none focus:ring-1 focus:ring-gray-300 shadow-sm text-base disabled:opacity-50 disabled:bg-gray-100"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleMainSend()}
-              placeholder="הקלידי הודעה..."
-              disabled={isWaiting}
+              placeholder={guestLimitReached ? "הגעת למגבלת השאלות לאורח 🔒" : "הקלידי הודעה..."}
+              disabled={isWaiting || guestLimitReached}
             />
-            <button onClick={handleMainSend} disabled={isWaiting} className="bg-[#00a884] text-white px-8 rounded-xl hover:bg-[#008f6f] font-bold transition-colors shadow-sm disabled:bg-gray-400">
+            <button 
+              onClick={handleMainSend} 
+              disabled={isWaiting || guestLimitReached} 
+              className="bg-[#00a884] text-white px-8 rounded-xl hover:bg-[#008f6f] font-bold transition-colors shadow-sm disabled:bg-gray-400"
+            >
               שלח
             </button>
           </div>
-          <div className="w-full max-w-3xl text-xs text-gray-400 text-right px-2">
-            מודל פעיל כעת: <span className="font-medium text-gray-500">{currentModelName}</span>
+          <div className="w-full max-w-3xl text-xs text-gray-400 text-right px-2 flex justify-between">
+            <span>מודל פעיל כעת: <span className="font-medium text-gray-500">{currentModelName}</span></span>
+            {isGuest && <span className="text-amber-600 font-medium">{guestLimitReached ? "נגמרו השאלות לאורח" : "שאלה 1 מתוך 1"}</span>}
           </div>
         </div>
 
