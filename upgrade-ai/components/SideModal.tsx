@@ -44,8 +44,8 @@ export default function SideModal({ isOpen, onClose, mainContext }: SideModalPro
     try {
       const fullContext = [...mainContext, ...internalMessages];
       
-      // תיקון: שמרנו את התשובה כ-response, ואז חילצנו ממנה את הטקסט
-      const response = await askGemini(userMessage.parts[0].text, fullContext);
+      // התיקון שלנו: הוספנו פסיק ומרכאות ריקות בסוף כדי להשלים את 3 הנתונים ש-askGemini דורשת
+      const response = await askGemini(userMessage.parts[0].text, fullContext, "");
       
       const modelMessage: ChatMessageType = { role: 'model', parts: [{ text: response.text }] };
       setInternalMessages(prev => [...prev, modelMessage]);
