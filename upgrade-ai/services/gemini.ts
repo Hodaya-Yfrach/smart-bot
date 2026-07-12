@@ -1,22 +1,8 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { ChatMessage } from "@/types/chat";
-
-const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
-
-// הרשימה ממוינת מהאיכותי ביותר כלפי מטה (משפחת ה-Flash)
-const FALLBACK_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-3-flash-preview",
-  "gemini-2.5-flash",
-  "gemini-2.0-flash"
-];
-
-// הפונקציה עכשיו מקבלת גם את הכללים מהאתר כפרמטר נוסף
-export async function askGemini(userText: string, history: any[], systemInstruction: string) {
+export async function askGemini(userText: string, history: any[], systemInstruction: string): Promise<{ text: string; fallbackModelName?: string }> {
   // הדפדפן מוסיף את ההודעה החדשה להיסטוריה
   const messages = [...history, { role: 'user', parts: [{ text: userText }] }];
 
-  // במקום לפנות לגוגל, הדפדפן פונה לשרת Vercel שלנו!
+  // פנייה לשרת ה-Vercel שלנו כדי לעקוף את נטפרי
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -33,5 +19,9 @@ export async function askGemini(userText: string, history: any[], systemInstruct
     throw new Error(data.error);
   }
 
-  return { text: data.text };
+  // מחזירים גם את הטקסט וגם את המודל החלופי (אם יש)
+  return { 
+    text: data.text,
+    fallbackModelName: data.fallbackModelName
+  };
 }

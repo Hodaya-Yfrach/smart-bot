@@ -235,8 +235,8 @@ export default function Home() {
         combinedSystemInstructions += "הוראות לשיחה הנוכחית בלבד:\n" + chatRules.map(r => "- " + r.rule_text).join("\n");
       }
 
-      // שולחים ל-AI גם את הכללים המאוחדים
-     const response = await askGemini(userText, mainMessages, combinedSystemInstructions) as any;
+      // שולחים ל-AI גם את הכללים המאוחדים - עם התוספת של as any
+      const response = await askGemini(userText, mainMessages, combinedSystemInstructions) as any;
       const modelMessage: ChatMessageType = { role: 'model', parts: [{ text: response.text }] };
       setMainMessages(prev => [...prev, modelMessage]);
 
