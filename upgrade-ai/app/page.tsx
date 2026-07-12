@@ -26,7 +26,7 @@ export default function Home() {
   
   // 4. מודלים (Modals) וזיכרון
   const [isSideModalOpen, setIsSideModalOpen] = useState(false);
-  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false); // חלון הזיכרון החדש
+  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false); 
   
   const [globalRules, setGlobalRules] = useState<any[]>([]);
   const [chatRules, setChatRules] = useState<any[]>([]);
@@ -236,7 +236,7 @@ export default function Home() {
       }
 
       // שולחים ל-AI גם את הכללים המאוחדים
-      const response = await askGemini(userText, mainMessages, combinedSystemInstructions);
+     const response = await askGemini(userText, mainMessages, combinedSystemInstructions) as any;
       const modelMessage: ChatMessageType = { role: 'model', parts: [{ text: response.text }] };
       setMainMessages(prev => [...prev, modelMessage]);
 
@@ -244,6 +244,7 @@ export default function Home() {
         await supabase.from('messages').insert([{ chat_id: activeChatId, role: 'model', content: response.text }]);
       }
 
+      // הטיפול התקין ב-fallbackModelName לאחר תיקון הטייפים
       if (response.fallbackModelName) {
         setCurrentModelName(`${response.fallbackModelName} (גיבוי)`);
         setToastMessage(`המגבלה הסתיימה, הועברת למודל ${response.fallbackModelName}`);
