@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     const { messages, systemInstruction } = body;
 
     // השרת ב-Vercel מושך את המפתח מההגדרות
-    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const model = genAI.getGenerativeModel({
