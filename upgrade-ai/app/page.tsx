@@ -58,7 +58,11 @@ const getHebrewAuthError = (errorMsg: string) => {
 };
 
 export default function Home() {
-  // 1. משתמשים (ללא נעילת אתר)
+  // 1. נעילת אתר
+  const [isSiteUnlocked, setIsSiteUnlocked] = useState(false);
+  const [sitePasswordInput, setSitePasswordInput] = useState('');
+
+  // 2. משתמשים
   const [user, setUser] = useState<User | null>(null);
   const [isGuest, setIsGuest] = useState(false);
   const [isLoginMode, setIsLoginMode] = useState(true); // מעבר בין התחברות להרשמה
@@ -68,13 +72,13 @@ export default function Home() {
   const [authPassword, setAuthPassword] = useState('');
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
 
-  // 2. צ'אט והיסטוריה
+  // 3. צ'אט והיסטוריה
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [mainMessages, setMainMessages] = useState<ChatMessageType[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatRecord[]>([]);
   const [input, setInput] = useState('');
 
-  // 3. מודלים (Modals) וזיכרון
+  // 4. מודלים (Modals) וזיכרון
   const [isSideModalOpen, setIsSideModalOpen] = useState(false);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -84,7 +88,7 @@ export default function Home() {
   const [newGlobalRule, setNewGlobalRule] = useState('');
   const [newChatRule, setNewChatRule] = useState('');
 
-  // 4. מצבי AI וחיבור (BYOK + Fallback)
+  // 5. מצבי AI וחיבור (BYOK + Fallback)
   const [isWaiting, setIsWaiting] = useState(false);
   const [countdown, setCountdown] = useState(15);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -92,7 +96,7 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0]);
   const [disabledModels, setDisabledModels] = useState<string[]>([]);
   
-  // 5. ניהול מפתח API נעילה/עריכה
+  // 6. ניהול מפתח API נעילה/עריכה ב-DB
   const [userApiKey, setUserApiKey] = useState('');
   const [isApiKeyLocked, setIsApiKeyLocked] = useState(false); 
   const [currentModelName, setCurrentModelName] = useState(AVAILABLE_MODELS[0]);
@@ -136,7 +140,7 @@ export default function Home() {
         if (profile) {
           if (profile.api_key) {
             setUserApiKey(profile.api_key);
-            setIsApiKeyLocked(true); 
+            setIsApiKeyLocked(true); // נועל אוטומטית אם יש מפתח
           }
           if (profile.preferred_model) {
             setSelectedModel(profile.preferred_model);
@@ -273,6 +277,15 @@ export default function Home() {
   };
 
   // --- פעולות התחברות ---
+  const unlockSite = async () => {
+    const isCorrect = await verifySitePassword(sitePasswordInput);
+    if (isCorrect) {
+      setIsSiteUnlocked(true);
+    } else {
+      alert("סיסמת אתר שגויה");
+    }
+  };
+
   const handleLogin = async () => {
     if (!email || !authPassword) {
       alert("אנא מלאו אימייל וסיסמה.");
@@ -445,6 +458,28 @@ export default function Home() {
     }
   };
 
+  // --- רינדור מסכים ---
+
+  if (!isSiteUnlocked) {
+    return (
+      <div dir="rtl" className="flex h-[100dvh] items-center justify-center bg-[#efeae2]">
+        <div className="p-8 bg-white rounded-2xl shadow-xl w-full max-w-sm border border-gray-200">
+          <div className="w-16 h-16 bg-[#ec4899] rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-sm">🔒</div>
+          <h1 className="text-xl font-bold text-gray-800 mb-6 text-center">כניסה למערכת המשפחתית</h1>
+          <input
+            type="password"
+            className="w-full p-3 border border-gray-300 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-center"
+            placeholder="הזיני סיסמת אתר..."
+            value={sitePasswordInput}
+            onChange={(e) => setSitePasswordInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && unlockSite()}
+          />
+          <button onClick={unlockSite} className="w-full bg-[#ec4899] text-white py-3 rounded-xl font-bold hover:bg-[#db2777] transition-all">כניסה</button>
+        </div>
+      </div>
+    );
+  }
+
   // --- רינדור מסך התחברות / הרשמה ---
   if (!user && !isGuest) {
     return (
@@ -476,7 +511,7 @@ export default function Home() {
 
           <input
             type="email"
-            placeholder="אימייל"
+            placeholder="אימייל (אישי)"
             className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-right"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -502,11 +537,11 @@ export default function Home() {
 
           {isLoginMode ? (
             <button onClick={handleLogin} disabled={isLoadingAuth} className="w-full bg-[#ec4899] text-white py-3 rounded-xl font-bold hover:bg-[#db2777] mb-3 transition-all disabled:opacity-50">
-              התחברות לחשבון
+              התחברות פרופיל קיים
             </button>
           ) : (
             <button onClick={handleSignUp} disabled={isLoadingAuth} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-700 mb-3 transition-all disabled:opacity-50">
-              הירשם עכשיו
+              יצירת פרופיל חדש
             </button>
           )}
           
@@ -589,7 +624,6 @@ export default function Home() {
             {isWaiting && (
               <div className="flex w-full mb-4 justify-start animate-fade-in">
                 <div className="bg-white border border-gray-200 text-gray-600 rounded-2xl rounded-tr-none p-3 px-5 text-sm shadow-sm flex items-center gap-3">
-                  {/* עיגול הטעינה הפך לוורוד */}
                   <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-[#ec4899] rounded-full"></div>
                   <span>ממתין לתשובה... {countdown > 0 ? `(${countdown} שניות)` : '(מעבד...)'}</span>
                 </div>
@@ -741,7 +775,6 @@ export default function Home() {
                           <p className="text-sm text-gray-500 italic">אין כללים ספציפיים לשיחה זו.</p>
                         ) : (
                           chatRules.map(rule => (
-                            // שינינו את הירוק (green-50, green-900) לוורוד (pink-50, pink-900)
                             <div key={rule.id} className="flex justify-between items-start bg-pink-50 p-3 rounded-lg text-sm text-pink-900 border border-pink-100">
                               <span className="whitespace-pre-wrap flex-1">{rule.rule_text}</span>
                               <button onClick={() => deleteChatRule(rule.id)} className="text-red-500 hover:text-red-700 ml-2 bg-white p-1 rounded shadow-sm text-xs">מחק</button>
