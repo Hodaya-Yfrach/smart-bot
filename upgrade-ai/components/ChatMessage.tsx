@@ -1,30 +1,21 @@
-import React, { memo } from 'react';
+"use client";
 import { ChatMessage as ChatMessageType } from '@/types/chat';
 
-interface Props {
-  message: ChatMessageType;
-}
-
-// שימוש ב-memo לשיפור ביצועים משמעותי בשיחות ארוכות
-const ChatMessage = memo(function ChatMessage({ message }: Props) {
+export default function ChatMessage({ message }: { message: ChatMessageType }) {
+  // בודקים האם ההודעה נשלחה על ידי המשתמש או על ידי המודל
   const isUser = message.role === 'user';
 
   return (
     <div className={`flex w-full mb-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div 
-        dir="auto" 
-        className={`max-w-[85%] sm:max-w-[75%] p-3 text-sm md:text-base shadow-sm relative transition-all
-          ${isUser 
-            ? 'bg-[#dcf8c6] text-gray-900 rounded-2xl rounded-tl-none' 
-            : 'bg-white border border-gray-200 text-gray-800 rounded-2xl rounded-tr-none'
-          }`}
+        className={`max-w-[80%] p-3 px-5 rounded-2xl text-sm shadow-sm ${
+          isUser 
+            ? 'bg-[#ec4899] text-white rounded-tl-none' // בועת הלקוח שונתה לוורוד
+            : 'bg-white border border-gray-200 text-gray-800 rounded-tr-none' // בועת המודל נשארה לבנה
+        }`}
       >
-        <p className="whitespace-pre-wrap leading-relaxed font-normal">
-          {message.parts[0].text}
-        </p>
+        <span className="whitespace-pre-wrap">{message.parts[0].text}</span>
       </div>
     </div>
   );
-});
-
-export default ChatMessage;
+}
