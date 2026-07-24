@@ -1,18 +1,67 @@
 "use client";
+import { verifySitePassword } from './actions';
 import { useState, useEffect } from 'react';
 import ChatMessage from '@/components/ChatMessage';
 import SideModal from '@/components/SideModal';
-import { ChatMessage as ChatMessageType } from '@/types/chat';
-import { askGemini } from '@/services/gemini';
+import { ChatMessage as ChatMessageType, GeminiResponse } from '@/types/chat';
+import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
+import { User } from '@supabase/supabase-js';
 
+// --- הגדרות טיפוסים מקומיות למניעת שגיאות TS ---
+interface RuleRecord {
+  id: string;
+  rule_text: string;
+}
+
+interface ChatRecord {
+  id: string;
+  title: string;
+  created_at: string;
+}
+
+interface DbMessage {
+  role: 'user' | 'model';
+  content: string;
+}
+
+const AVAILABLE_MODELS = [
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-lite",
+  "gemini-3-flash-preview"
+];
+// פונקציית עזר לתרגום שגיאות Supabase לעברית מובנת
+const getHebrewAuthError = (errorMsg: string) => {
+  const msg = errorMsg.toLowerCase();
+  
+  if (msg.includes('user already registered')) {
+    return "כתובת האימייל הזו כבר רשומה במערכת. אנא לחצו על 'התחברות פרופיל קיים'.";
+  }
+  if (msg.includes('invalid login credentials')) {
+    return "כתובת האימייל או הסיסמה שהזנתם שגויים. אנא נסו שוב.";
+  }
+  if (msg.includes('email not confirmed')) {
+    return "טרם אימתם את כתובת האימייל. אנא בדקו את תיבת הדואר הנכנס שלכם (או הספאם).";
+  }
+  if (msg.includes('password should be at least 6 characters')) {
+    return "הסיסמה חלשה מדי. היא חייבת להכיל לפחות 6 תווים.";
+  }
+  if (msg.includes('valid email')) {
+    return "אנא הזינו כתובת אימייל תקינה.";
+  }
+  
+  // שגיאת גיבוי כללית כדי שהלקוח לעולם לא יראה שגיאת שרת באנגלית
+  return "אירעה שגיאה בתקשורת. אנא ודאו שכל הפרטים נכונים ונסו שוב.";
+};
 export default function Home() {
   // 1. נעילת אתר
   const [isSiteUnlocked, setIsSiteUnlocked] = useState(false);
   const [sitePasswordInput, setSitePasswordInput] = useState('');
 
   // 2. משתמשים
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isGuest, setIsGuest] = useState(false);
   const [email, setEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -21,26 +70,48 @@ export default function Home() {
   // 3. צ'אט והיסטוריה
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [mainMessages, setMainMessages] = useState<ChatMessageType[]>([]);
-  const [chatHistory, setChatHistory] = useState<any[]>([]); 
+  const [chatHistory, setChatHistory] = useState<ChatRecord[]>([]);
   const [input, setInput] = useState('');
-  
+
+  // 3.1 עריכה/מחיקה של שיחות בהיסטוריה
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editChatTitle, setEditChatTitle] = useState('');
+  const [chatActionLoadingId, setChatActionLoadingId] = useState<string | null>(null);
+
   // 4. מודלים (Modals) וזיכרון
   const [isSideModalOpen, setIsSideModalOpen] = useState(false);
-  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false); 
-  
-  const [globalRules, setGlobalRules] = useState<any[]>([]);
-  const [chatRules, setChatRules] = useState<any[]>([]);
+  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
+  const [globalRules, setGlobalRules] = useState<RuleRecord[]>([]);
+  const [chatRules, setChatRules] = useState<RuleRecord[]>([]);
   const [newGlobalRule, setNewGlobalRule] = useState('');
   const [newChatRule, setNewChatRule] = useState('');
 
-  // 5. מצבי AI והמתנה
+  // 5. מצבי AI וחיבור (BYOK + Fallback)
   const [isWaiting, setIsWaiting] = useState(false);
   const [countdown, setCountdown] = useState(15);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [currentModelName, setCurrentModelName] = useState('Gemini (ראשי)');
+
+  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0]);
+  const [disabledModels, setDisabledModels] = useState<string[]>([]);
+  const [userApiKey, setUserApiKey] = useState('');
+  const [currentModelName, setCurrentModelName] = useState(AVAILABLE_MODELS[0]);
 
   // בדיקה אם האורח ניצל את השאלה היחידה שלו
   const guestLimitReached = isGuest && mainMessages.some(msg => msg.role === 'user');
+
+  // פונקציית עזר לבניית הוראות המערכת המאוחדות
+  const getCombinedSystemInstructions = () => {
+    let combined = "";
+    if (globalRules.length > 0) {
+      combined += "הוראות קבועות למערכת (חובה תמיד לציית):\n" + globalRules.map(r => "- " + r.rule_text).join("\n") + "\n\n";
+    }
+    if (chatRules.length > 0) {
+      combined += "הוראות לשיחה הנוכחית בלבד:\n" + chatRules.map(r => "- " + r.rule_text).join("\n");
+    }
+    return combined;
+  };
 
   // --- Effects ---
   useEffect(() => {
@@ -80,23 +151,20 @@ export default function Home() {
   // --- פונקציות זיכרון וכללים ---
   const loadRules = async () => {
     if (!user) return;
-    
-    // שליפת כללים גלובליים
-    const { data: gRules } = await supabase.from('global_rules').select('*').eq('user_id', user.id);
-    if (gRules) setGlobalRules(gRules);
+    const { data: gRules } = await supabase.from('global_rules').select('id, rule_text').eq('user_id', user.id);
+    if (gRules) setGlobalRules(gRules as RuleRecord[]);
 
-    // שליפת כללים לשיחה הנוכחית
     if (currentChatId) {
-      const { data: cRules } = await supabase.from('chat_rules').select('*').eq('chat_id', currentChatId);
-      if (cRules) setChatRules(cRules);
+      const { data: cRules } = await supabase.from('chat_rules').select('id, rule_text').eq('chat_id', currentChatId);
+      if (cRules) setChatRules(cRules as RuleRecord[]);
     }
   };
 
   const addGlobalRule = async () => {
     if (!newGlobalRule.trim() || !user) return;
-    const { data, error } = await supabase.from('global_rules').insert([{ user_id: user.id, rule_text: newGlobalRule }]).select();
+    const { data, error } = await supabase.from('global_rules').insert([{ user_id: user.id, rule_text: newGlobalRule }]).select('id, rule_text');
     if (!error && data) {
-      setGlobalRules([...globalRules, data[0]]);
+      setGlobalRules([...globalRules, data[0] as RuleRecord]);
       setNewGlobalRule('');
     }
   };
@@ -108,9 +176,9 @@ export default function Home() {
 
   const addChatRule = async () => {
     if (!newChatRule.trim() || !currentChatId) return alert("יש להתחיל שיחה כדי להוסיף לה כלל");
-    const { data, error } = await supabase.from('chat_rules').insert([{ chat_id: currentChatId, rule_text: newChatRule }]).select();
+    const { data, error } = await supabase.from('chat_rules').insert([{ chat_id: currentChatId, rule_text: newChatRule }]).select('id, rule_text');
     if (!error && data) {
-      setChatRules([...chatRules, data[0]]);
+      setChatRules([...chatRules, data[0] as RuleRecord]);
       setNewChatRule('');
     }
   };
@@ -123,20 +191,20 @@ export default function Home() {
   // --- פונקציות היסטוריה ומסד נתונים ---
   const loadChatHistory = async () => {
     if (!user) return;
-    const { data } = await supabase.from('chats').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
-    if (data) setChatHistory(data);
+    const { data } = await supabase.from('chats').select('id, title, created_at').eq('user_id', user.id).order('created_at', { ascending: false });
+    if (data) setChatHistory(data as ChatRecord[]);
   };
 
   const loadSingleChat = async (chatId: string) => {
     setCurrentChatId(chatId);
-    const { data } = await supabase.from('messages').select('*').eq('chat_id', chatId).order('created_at', { ascending: true });
+    const { data } = await supabase.from('messages').select('role, content').eq('chat_id', chatId).order('created_at', { ascending: true });
     if (data) {
-      const formattedMessages: ChatMessageType[] = data.map((msg: any) => ({
+      const formattedMessages: ChatMessageType[] = (data as DbMessage[]).map((msg) => ({
         role: msg.role,
         parts: [{ text: msg.content }]
       }));
       setMainMessages(formattedMessages);
-      setCurrentModelName('Gemini (ראשי)');
+      setCurrentModelName(selectedModel);
     }
   };
 
@@ -150,35 +218,105 @@ export default function Home() {
     }
 
     const title = firstMessageText.substring(0, 25) + "...";
-    const { data: newChat, error } = await supabase.from('chats').insert([{ user_id: user.id, title }]).select().single();
-    if (error) return null;
+    const { data: newChat, error } = await supabase.from('chats').insert([{ user_id: user.id, title }]).select('id').single();
+    if (error || !newChat) return null;
 
     setCurrentChatId(newChat.id);
-    await loadChatHistory(); 
+    await loadChatHistory();
     return newChat.id;
   };
 
-  // --- פעולות התחברות ---
-  const unlockSite = () => {
-    if (sitePasswordInput === process.env.NEXT_PUBLIC_APP_PASSWORD) setIsSiteUnlocked(true);
-    else alert("סיסמת אתר שגויה");
+  // --- ניהול שיחות בהיסטוריה: מחיקה ועריכת שם ---
+  const handleDeleteChat = async (chatId: string) => {
+    const isConfirmed = window.confirm('האם את בטוחה שברצונך למחוק שיחה זו? פעולה זו בלתי הפיכה.');
+    if (!isConfirmed) return;
+
+    setChatActionLoadingId(chatId);
+    const { error } = await supabase.from('chats').delete().eq('id', chatId);
+
+    if (!error) {
+      if (currentChatId === chatId) {
+        startNewChat();
+      }
+      await loadChatHistory();
+    } else {
+      alert('אירעה שגיאה במחיקת השיחה');
+    }
+    setChatActionLoadingId(null);
   };
 
-  const handleLogin = async () => {
+  const startEditingChat = (chat: ChatRecord) => {
+    setEditingChatId(chat.id);
+    setEditChatTitle(chat.title);
+  };
+
+  const handleSaveChatTitle = async (chatId: string) => {
+    if (!editChatTitle.trim()) {
+      setEditingChatId(null);
+      return;
+    }
+
+    setChatActionLoadingId(chatId);
+    const { error } = await supabase.from('chats').update({ title: editChatTitle }).eq('id', chatId);
+
+    if (!error) {
+      setEditingChatId(null);
+      await loadChatHistory();
+    } else {
+      alert('אירעה שגיאה בעדכון השם');
+    }
+    setChatActionLoadingId(null);
+  };
+
+  // --- פעולות התחברות ---
+  const unlockSite = async () => {
+    // שולחים את הסיסמה לבדיקה בשרת המאובטח
+    const isCorrect = await verifySitePassword(sitePasswordInput);
+    
+    if (isCorrect) {
+      setIsSiteUnlocked(true);
+    } else {
+      alert("סיסמת אתר שגויה");
+    }
+  };
+
+ const handleLogin = async () => {
+    if (!email || !authPassword) {
+      alert("אנא מלאו אימייל וסיסמה.");
+      return;
+    }
+    
     setIsLoadingAuth(true);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
-    if (error) alert("שגיאה בהתחברות: " + error.message);
-    else setUser(data.user);
+    
+    if (error) {
+      // כאן אנחנו משתמשים בפונקציית התרגום במקום להציג את error.message
+      alert(getHebrewAuthError(error.message));
+    } else {
+      setUser(data.user);
+    }
     setIsLoadingAuth(false);
   };
 
   const handleSignUp = async () => {
+    if (!email || !authPassword) {
+      alert("אנא מלאו אימייל וסיסמה להרשמה.");
+      return;
+    }
+
     setIsLoadingAuth(true);
     const { data, error } = await supabase.auth.signUp({ email, password: authPassword });
-    if (error) alert("שגיאה בהרשמה: " + error.message);
-    else {
-      alert("הרשמה בוצעה בהצלחה! מתחבר כעת...");
-      setUser(data.user);
+    
+    if (error) {
+      alert(getHebrewAuthError(error.message));
+    } else {
+      // בדיקה: אם Supabase מחזיר user אבל אין session, סימן שאימות האימייל דלוק בהגדרות
+      if (data.user && !data.session) {
+        alert("הרשמה בוצעה! תודה שבחרתם ב smart bot.");
+      } else {
+        alert("הרשמה בוצעה בהצלחה! מתחבר כעת...");
+        setUser(data.user);
+      }
     }
     setIsLoadingAuth(false);
   };
@@ -189,19 +327,18 @@ export default function Home() {
     setIsGuest(false);
     setMainMessages([]);
     setCurrentChatId(null);
-    setCurrentModelName('Gemini (ראשי)');
+    setCurrentModelName(AVAILABLE_MODELS[0]);
   };
 
   const startNewChat = () => {
     setMainMessages([]);
     setCurrentChatId(null);
-    setChatRules([]); // מנקה כללים של השיחה הקודמת
-    setCurrentModelName('Gemini (ראשי)');
+    setChatRules([]);
+    setCurrentModelName(selectedModel);
   };
 
-  // --- שליחת הודעה בצ'אט ---
+  // --- שליחת הודעה בצ'אט הראשי ---
   const handleMainSend = async () => {
-    // הגבלת אורח
     if (guestLimitReached) {
       alert("אורחים יכולים לשאול רק שאלה אחת. כדי להמשיך, אנא התחברו או צרו פרופיל חדש 💙");
       return;
@@ -211,7 +348,7 @@ export default function Home() {
 
     const userText = input;
     const userMessage: ChatMessageType = { role: 'user', parts: [{ text: userText }] };
-    
+
     setMainMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsWaiting(true);
@@ -226,17 +363,18 @@ export default function Home() {
         }
       }
 
-      // איחוד הכללים להוראת מערכת אחת
-      let combinedSystemInstructions = "";
-      if (globalRules.length > 0) {
-        combinedSystemInstructions += "הוראות קבועות למערכת (חובה תמיד לציית):\n" + globalRules.map(r => "- " + r.rule_text).join("\n") + "\n\n";
-      }
-      if (chatRules.length > 0) {
-        combinedSystemInstructions += "הוראות לשיחה הנוכחית בלבד:\n" + chatRules.map(r => "- " + r.rule_text).join("\n");
-      }
+      const combinedSystemInstructions = getCombinedSystemInstructions();
+      const fallbackModels = AVAILABLE_MODELS.filter(m => m !== selectedModel && !disabledModels.includes(m));
 
-      // שולחים ל-AI גם את הכללים המאוחדים - עם התוספת של as any
-      const response = await askGemini(userText, mainMessages, combinedSystemInstructions) as any;
+      const response: GeminiResponse = await askGemini(
+        userText,
+        mainMessages,
+        combinedSystemInstructions,
+        selectedModel,
+        fallbackModels,
+        userApiKey
+      );
+
       const modelMessage: ChatMessageType = { role: 'model', parts: [{ text: response.text }] };
       setMainMessages(prev => [...prev, modelMessage]);
 
@@ -244,30 +382,51 @@ export default function Home() {
         await supabase.from('messages').insert([{ chat_id: activeChatId, role: 'model', content: response.text }]);
       }
 
-      // הטיפול התקין ב-fallbackModelName לאחר תיקון הטייפים
-      if (response.fallbackModelName) {
-        setCurrentModelName(`${response.fallbackModelName} (גיבוי)`);
-        setToastMessage(`המגבלה הסתיימה, הועברת למודל ${response.fallbackModelName}`);
-        setTimeout(() => setToastMessage(null), 3000);
+      if (response.modelUsed !== selectedModel) {
+        setCurrentModelName(`${response.modelUsed} (גיבוי)`);
+        setToastMessage(`עקב עומס, הועברת אוטומטית למודל ${response.modelUsed}`);
+        setTimeout(() => setToastMessage(null), 4000);
+      } else {
+        setCurrentModelName(selectedModel);
       }
-      
-    } catch (error) {
+
+      if (response.failedModels && response.failedModels.length > 0) {
+        setDisabledModels(prev => [...new Set([...prev, ...response.failedModels])]);
+        setTimeout(() => {
+          setDisabledModels(prev => prev.filter(m => !response.failedModels.includes(m)));
+        }, 60000);
+      }
+
+    } catch (error: unknown) {
       console.error("שגיאה בצ'אט הראשי:", error);
-      alert("הייתה בעיה בתקשורת עם ה-AI.");
+
+      if (error instanceof ChatApiError) {
+        alert(error.message);
+        if (error.failedModels.length > 0) {
+          setDisabledModels(prev => [...new Set([...prev, ...error.failedModels])]);
+          setTimeout(() => {
+            setDisabledModels(prev => prev.filter(m => !error.failedModels.includes(m)));
+          }, 60000);
+        }
+      } else {
+        const errMessage = error instanceof Error ? error.message : "הייתה בעיה בתקשורת עם ה-AI.";
+        alert(errMessage);
+      }
     } finally {
       setIsWaiting(false);
     }
   };
 
   // --- רינדור מסכים ---
+
   if (!isSiteUnlocked) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#efeae2] dir-rtl">
+      <div dir="rtl" className="flex h-[100dvh] items-center justify-center bg-[#efeae2]">
         <div className="p-8 bg-white rounded-2xl shadow-xl w-full max-w-sm border border-gray-200">
           <div className="w-16 h-16 bg-[#00a884] rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-sm">🔒</div>
           <h1 className="text-xl font-bold text-gray-800 mb-6 text-center">כניסה למערכת המשפחתית</h1>
-          <input 
-            type="password" 
+          <input
+            type="password"
             className="w-full p-3 border border-gray-300 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-[#00a884] text-center"
             placeholder="הזיני סיסמת אתר..."
             value={sitePasswordInput}
@@ -282,21 +441,21 @@ export default function Home() {
 
   if (!user && !isGuest) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#efeae2] dir-rtl">
+      <div dir="rtl" className="flex h-[100dvh] items-center justify-center bg-[#efeae2]">
         <div className="p-8 bg-white rounded-2xl shadow-xl w-full max-w-sm border border-gray-200">
           <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-sm text-white">👤</div>
           <h1 className="text-xl font-bold text-gray-800 mb-6 text-center">מי מתחבר/ת?</h1>
-          <input 
-            type="email" 
-            placeholder="אימייל (אישי)" 
-            className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-slate-800"
+          <input
+            type="email"
+            placeholder="אימייל (אישי)"
+            className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-slate-800 text-right"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
-          <input 
-            type="password" 
-            placeholder="סיסמה (לפחות 6 תווים)" 
-            className="w-full p-3 border border-gray-300 rounded-xl mb-6 focus:outline-none focus:ring-2 focus:ring-slate-800"
+          <input
+            type="password"
+            placeholder="סיסמה (לפחות 6 תווים)"
+            className="w-full p-3 border border-gray-300 rounded-xl mb-6 focus:outline-none focus:ring-2 focus:ring-slate-800 text-right"
             value={authPassword}
             onChange={(e) => setAuthPassword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
@@ -314,36 +473,83 @@ export default function Home() {
     );
   }
 
+  // --- המסך הראשי ---
   return (
-    <div className="flex h-screen bg-[#efeae2] dir-rtl relative">
-      
+    <div dir="rtl" className="flex h-[100dvh] overflow-hidden bg-[#efeae2] relative">
+
       {/* תפריט צד (Sidebar) */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-xl z-20 hidden md:flex">
+      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-xl z-20 hidden md:flex shrink-0">
         <div className="p-4 border-b border-slate-800">
           <button onClick={startNewChat} className="w-full flex items-center justify-center gap-2 bg-[#00a884] hover:bg-[#008f6f] text-white py-3 px-4 rounded-xl font-medium transition-colors">
             <span>+</span> שיחה חדשה
           </button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-3">
           {user ? (
             <>
               <h3 className="text-xs font-semibold text-slate-500 mb-3 px-2 uppercase tracking-wider">היסטוריית שיחות ({chatHistory.length}/10)</h3>
-              <div className="space-y-1">
+              <ul className="space-y-1">
                 {chatHistory.map((chat) => (
-                  <button 
+                  <li
                     key={chat.id}
-                    onClick={() => loadSingleChat(chat.id)}
-                    className={`w-full text-right p-3 rounded-lg hover:bg-slate-800 transition-colors truncate text-sm ${currentChatId === chat.id ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                    className={`group rounded-lg transition-colors ${currentChatId === chat.id ? 'bg-slate-800' : 'hover:bg-slate-800'}`}
                   >
-                    {chat.title}
-                  </button>
+                    {editingChatId === chat.id ? (
+                      <div className="flex items-center gap-2 p-2">
+                        <input
+                          type="text"
+                          value={editChatTitle}
+                          onChange={(e) => setEditChatTitle(e.target.value)}
+                          className="flex-1 bg-slate-700 text-white text-sm rounded px-2 py-1 outline-none focus:ring-1 focus:ring-[#00a884]"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveChatTitle(chat.id);
+                            if (e.key === 'Escape') setEditingChatId(null);
+                          }}
+                        />
+                        <button
+                          onClick={() => handleSaveChatTitle(chat.id)}
+                          className="text-[#00a884] hover:text-[#02c497] text-xs font-medium shrink-0"
+                        >
+                          שמור
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => loadSingleChat(chat.id)}
+                          className={`flex-1 text-right p-3 truncate text-sm ${currentChatId === chat.id ? 'text-white' : 'text-slate-400'}`}
+                        >
+                          {chat.title}
+                        </button>
+                        <div className="flex gap-2 pl-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => startEditingChat(chat)}
+                            disabled={chatActionLoadingId === chat.id}
+                            className="text-blue-400 hover:text-blue-300 text-xs"
+                            title="ערוך כותרת"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => handleDeleteChat(chat.id)}
+                            disabled={chatActionLoadingId === chat.id}
+                            className="text-red-400 hover:text-red-300 text-xs"
+                            title="מחק שיחה"
+                          >
+                            {chatActionLoadingId === chat.id ? '...' : '🗑'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
                 ))}
-              </div>
+              </ul>
             </>
           ) : (
             <div className="text-center mt-10 text-slate-500 text-sm px-4">
-              את/ה מחובר/ת כאורח.<br/>השיחות לא נשמרות.
+              את/ה מחובר/ת כאורח.<br />השיחות לא נשמרות.
             </div>
           )}
         </div>
@@ -353,21 +559,24 @@ export default function Home() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col relative">
-        <header className="bg-[#f0f2f5] p-4 shadow-sm z-10 flex justify-between items-center border-b border-gray-200">
+      {/* אזור התוכן המרכזי */}
+      <main className="flex-1 flex flex-col relative h-full overflow-hidden">
+        <header className="bg-[#f0f2f5] p-4 shadow-sm z-10 flex justify-between items-center border-b border-gray-200 shrink-0">
           <div>
             <h1 className="text-xl font-bold text-gray-800">AI Workspace</h1>
             {user && <span className="text-xs text-gray-500">{user.email}</span>}
           </div>
           <div className="flex gap-2">
-            {/* כפתור הזיכרון החדש */}
+            <button onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 font-medium transition-all shadow-sm flex items-center gap-2 text-sm">
+              <span className="text-lg">⚙️</span> הגדרות AI
+            </button>
             {user && (
               <button onClick={() => setIsMemoryModalOpen(true)} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 font-medium transition-all shadow-sm flex items-center gap-2 text-sm">
                 <span className="text-lg">🧠</span> כללים וזיכרון
               </button>
             )}
             <button onClick={() => setIsSideModalOpen(true)} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 font-medium transition-all shadow-sm flex items-center gap-2 text-sm">
-              <span className="text-lg">💡</span> התייעצות צדדית
+              <span className="text-lg">💡</span> התייעצות
             </button>
           </div>
         </header>
@@ -378,6 +587,7 @@ export default function Home() {
           </div>
         )}
 
+        {/* אזור ההודעות הנגלל */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-3xl mx-auto">
             {mainMessages.length === 0 ? (
@@ -388,7 +598,7 @@ export default function Home() {
             ) : (
               mainMessages.map((msg, index) => <ChatMessage key={index} message={msg} />)
             )}
-            
+
             {isWaiting && (
               <div className="flex w-full mb-4 justify-start animate-fade-in">
                 <div className="bg-white border border-gray-200 text-gray-600 rounded-2xl rounded-tr-none p-3 px-5 text-sm shadow-sm flex items-center gap-3">
@@ -400,9 +610,10 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="bg-[#f0f2f5] p-3 md:p-4 border-t border-gray-200 flex flex-col items-center">
+        {/* סרגל הקלדה (דבוק לתחתית בזכות ה-shrink-0) */}
+        <div className="bg-[#f0f2f5] p-3 md:p-4 border-t border-gray-200 shrink-0 flex flex-col items-center">
           <div className="w-full max-w-3xl flex gap-3 mb-2">
-            <input 
+            <input
               className="flex-1 p-3 bg-white border-none rounded-xl focus:outline-none focus:ring-1 focus:ring-gray-300 shadow-sm text-base disabled:opacity-50 disabled:bg-gray-100"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -410,9 +621,9 @@ export default function Home() {
               placeholder={guestLimitReached ? "הגעת למגבלת השאלות לאורח 🔒" : "הקלידי הודעה..."}
               disabled={isWaiting || guestLimitReached}
             />
-            <button 
-              onClick={handleMainSend} 
-              disabled={isWaiting || guestLimitReached} 
+            <button
+              onClick={handleMainSend}
+              disabled={isWaiting || guestLimitReached}
               className="bg-[#00a884] text-white px-8 rounded-xl hover:bg-[#008f6f] font-bold transition-colors shadow-sm disabled:bg-gray-400"
             >
               שלח
@@ -424,9 +635,55 @@ export default function Home() {
           </div>
         </div>
 
-        <SideModal isOpen={isSideModalOpen} onClose={() => setIsSideModalOpen(false)} mainContext={mainMessages} />
+        {/* מודלים קופצים (Modals) */}
+        <SideModal
+          isOpen={isSideModalOpen}
+          onClose={() => setIsSideModalOpen(false)}
+          mainContext={mainMessages}
+          selectedModel={selectedModel}
+          userApiKey={userApiKey}
+          systemInstruction={getCombinedSystemInstructions()}
+        />
 
-        {/* --- חלון ניהול הכללים והזיכרון --- */}
+        {isSettingsModalOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
+              <div className="flex justify-between items-center mb-6 border-b pb-4">
+                <h2 className="text-xl font-bold flex items-center gap-2">⚙️ הגדרות AI</h2>
+                <button onClick={() => setIsSettingsModalOpen(false)} className="text-gray-500 hover:bg-gray-100 rounded-full w-8 h-8">✕</button>
+              </div>
+
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">בחירת מודל:</label>
+                  <select
+                    className="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 focus:ring-2 focus:ring-[#00a884] outline-none"
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                  >
+                    {AVAILABLE_MODELS.map(model => (
+                      <option key={model} value={model} disabled={disabledModels.includes(model)}>
+                        {model} {disabledModels.includes(model) ? '(עמוס כרגע - יתפנה בקרוב)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">מפתח API אישי (BYOK):</label>
+                  <input
+                    type="password"
+                    placeholder="השאר/י ריק כדי להשתמש במפתח של האתר"
+                    className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-[#00a884] outline-none"
+                    value={userApiKey}
+                    onChange={(e) => setUserApiKey(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {isMemoryModalOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-fade-in">
@@ -434,9 +691,8 @@ export default function Home() {
                 <h2 className="text-xl font-bold flex items-center gap-2"><span className="text-2xl">🧠</span> ניהול זיכרון וכללים</h2>
                 <button onClick={() => setIsMemoryModalOpen(false)} className="text-gray-500 hover:text-gray-800 bg-gray-200 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
               </header>
-              
+
               <div className="flex-1 overflow-y-auto p-6 space-y-8">
-                {/* אזור הכללים הקבועים */}
                 <section>
                   <h3 className="font-bold text-gray-800 mb-2 border-b pb-2">כללים תמידיים (חלים על כל השיחות)</h3>
                   <div className="space-y-2 mb-4">
@@ -452,20 +708,19 @@ export default function Home() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <textarea 
+                    <textarea
                       value={newGlobalRule} onChange={(e) => setNewGlobalRule(e.target.value)}
-                      placeholder="הגדירי כלל שתקף תמיד (למשל הפרומפט של נטפרי...)" 
+                      placeholder="הגדירי כלל שתקף תמיד..."
                       className="flex-1 p-2 border rounded-lg focus:ring-2 focus:ring-[#00a884] text-sm resize-none h-16"
                     />
                     <button onClick={addGlobalRule} className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg text-sm font-medium">הוסף כלל</button>
                   </div>
                 </section>
 
-                {/* אזור הכללים לשיחה הנוכחית */}
                 <section>
                   <h3 className="font-bold text-gray-800 mb-2 border-b pb-2">כללים מקומיים (לשיחה הנוכחית בלבד)</h3>
                   {!currentChatId ? (
-                    <p className="text-sm text-red-500 bg-red-50 p-3 rounded-lg">יש להתחיל שיחה חדשה (לשלוח הודעה ראשונה) כדי להגדיר לה כללים.</p>
+                    <p className="text-sm text-red-500 bg-red-50 p-3 rounded-lg">יש להתחיל שיחה חדשה כדי להגדיר לה כללים.</p>
                   ) : (
                     <>
                       <div className="space-y-2 mb-4">
@@ -481,9 +736,9 @@ export default function Home() {
                         )}
                       </div>
                       <div className="flex gap-2">
-                        <textarea 
+                        <textarea
                           value={newChatRule} onChange={(e) => setNewChatRule(e.target.value)}
-                          placeholder="הגדירי כלל ספציפי לשיחה זו..." 
+                          placeholder="הגדירי כלל ספציפי לשיחה זו..."
                           className="flex-1 p-2 border rounded-lg focus:ring-2 focus:ring-[#00a884] text-sm resize-none h-16"
                         />
                         <button onClick={addChatRule} className="bg-[#00a884] hover:bg-[#008f6f] text-white px-4 rounded-lg text-sm font-medium">הוסף לשיחה</button>
@@ -495,6 +750,7 @@ export default function Home() {
             </div>
           </div>
         )}
+
       </main>
     </div>
   );
