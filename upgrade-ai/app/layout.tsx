@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-
+import Link from "next/link";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -28,7 +28,14 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       dir="rtl"
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">{children}
+        <footer className="w-full text-center p-4 text-sm text-gray-500 bg-gray-50 border-t mt-auto">
+  <p>© {new Date().getFullYear()} פרויקט גמר. כל הזכויות שמורות.</p>
+  <Link href="/privacy" className="hover:text-blue-600 hover:underline mt-1 inline-block">
+    מדיניות פרטיות ותנאי שימוש
+  </Link>
+</footer>
+         </body>
     </html>
   );
 }

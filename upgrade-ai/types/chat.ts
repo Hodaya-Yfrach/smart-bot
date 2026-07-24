@@ -1,5 +1,11 @@
-// types/chat.ts
+export type Role = 'user' | 'model';
+
 export interface ChatMessage {
-  role: 'user' | 'model';
+  role: Role;
   parts: { text: string }[];
+}
+export interface GeminiResponse {
+  text: string;
+  modelUsed: string;
+  failedModels: string[];
 }
