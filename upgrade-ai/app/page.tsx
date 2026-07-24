@@ -3,7 +3,7 @@ import { verifySitePassword } from './actions';
 import { useState, useEffect } from 'react';
 import ChatMessage from '@/components/ChatMessage';
 import SideModal from '@/components/SideModal';
-import Sidebar from '@/components/Sidebar';
+import Sidebar from '@/components/history-bar';
 import { ChatMessage as ChatMessageType, GeminiResponse } from '@/types/chat';
 import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
