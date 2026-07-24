@@ -61,12 +61,15 @@ export default function Home() {
   const [sitePasswordInput, setSitePasswordInput] = useState('');
 
   // 2. משתמשים
+ // 2. משתמשים
   const [user, setUser] = useState<User | null>(null);
   const [isGuest, setIsGuest] = useState(false);
+  const [isLoginMode, setIsLoginMode] = useState(true); // מעבר בין התחברות להרשמה
+  const [fullName, setFullName] = useState(''); // שם
+  const [phone, setPhone] = useState('');       // טלפון
   const [email, setEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
-
   // 3. צ'אט והיסטוריה
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [mainMessages, setMainMessages] = useState<ChatMessageType[]>([]);
@@ -97,7 +100,16 @@ export default function Home() {
   const [disabledModels, setDisabledModels] = useState<string[]>([]);
   const [userApiKey, setUserApiKey] = useState('');
   const [currentModelName, setCurrentModelName] = useState(AVAILABLE_MODELS[0]);
+   const [isApiKeyLocked, setIsApiKeyLocked] = useState(false); // ניהול מצב נעילת המפתח
 
+  // טעינת המפתח מהדפדפן המקומי כשהאתר עולה
+  useEffect(() => {
+    const savedKey = localStorage.getItem('local_gemini_api_key');
+    if (savedKey) {
+      setUserApiKey(savedKey);
+      setIsApiKeyLocked(true); // אם יש מפתח שמור, ננעל אותו אוטומטית
+    }
+  }, []);
   // בדיקה אם האורח ניצל את השאלה היחידה שלו
   const guestLimitReached = isGuest && mainMessages.some(msg => msg.role === 'user');
 
@@ -299,20 +311,29 @@ export default function Home() {
   };
 
   const handleSignUp = async () => {
-    if (!email || !authPassword) {
-      alert("אנא מלאו אימייל וסיסמה להרשמה.");
+    if (!fullName || !phone || !email || !authPassword) {
+      alert("אנא מלאו את כל השדות להרשמה (שם, טלפון, אימייל וסיסמה).");
       return;
     }
 
     setIsLoadingAuth(true);
-    const { data, error } = await supabase.auth.signUp({ email, password: authPassword });
+    // אנו מעבירים לסופאבייס גם את המידע הנוסף (שם וטלפון) כדי שהטריגר שלנו ישמור אותם ב-DB
+    const { data, error } = await supabase.auth.signUp({ 
+      email, 
+      password: authPassword,
+      options: {
+        data: {
+          full_name: fullName,
+          phone: phone
+        }
+      }
+    });
     
     if (error) {
       alert(getHebrewAuthError(error.message));
     } else {
-      // בדיקה: אם Supabase מחזיר user אבל אין session, סימן שאימות האימייל דלוק בהגדרות
       if (data.user && !data.session) {
-        alert("הרשמה בוצעה! תודה שבחרתם ב smart bot.");
+        alert("הרשמה בוצעה! נשלח אליכם אימייל לאימות (או שיש לאשר התחברות).");
       } else {
         alert("הרשמה בוצעה בהצלחה! מתחבר כעת...");
         setUser(data.user);
@@ -439,15 +460,38 @@ export default function Home() {
     );
   }
 
+ // --- רינדור מסך התחברות / הרשמה (אם המשתמש לא מחובר ולא אורח) ---
   if (!user && !isGuest) {
     return (
       <div dir="rtl" className="flex h-[100dvh] items-center justify-center bg-[#efeae2]">
         <div className="p-8 bg-white rounded-2xl shadow-xl w-full max-w-sm border border-gray-200">
           <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-sm text-white">👤</div>
-          <h1 className="text-xl font-bold text-gray-800 mb-6 text-center">מי מתחבר/ת?</h1>
+          <h1 className="text-xl font-bold text-gray-800 mb-6 text-center">
+            {isLoginMode ? 'ברוכים השבים' : 'יצירת משתמש חדש'}
+          </h1>
+          
+          {!isLoginMode && (
+            <>
+              <input
+                type="text"
+                placeholder="שם מלא (חובה)"
+                className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-slate-800 text-right"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+              <input
+                type="tel"
+                placeholder="מספר טלפון (חובה)"
+                className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-slate-800 text-right"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </>
+          )}
+
           <input
             type="email"
-            placeholder="אימייל (אישי)"
+            placeholder="אימייל"
             className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-slate-800 text-right"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -455,14 +499,42 @@ export default function Home() {
           <input
             type="password"
             placeholder="סיסמה (לפחות 6 תווים)"
-            className="w-full p-3 border border-gray-300 rounded-xl mb-6 focus:outline-none focus:ring-2 focus:ring-slate-800 text-right"
+            className="w-full p-3 border border-gray-300 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-slate-800 text-right"
             value={authPassword}
             onChange={(e) => setAuthPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                isLoginMode ? handleLogin() : handleSignUp();
+              }
+            }}
           />
-          <button onClick={handleLogin} disabled={isLoadingAuth} className="w-full bg-[#00a884] text-white py-3 rounded-xl font-bold hover:bg-[#008f6f] mb-3 transition-all disabled:opacity-50">התחברות פרופיל קיים</button>
-          <button onClick={handleSignUp} disabled={isLoadingAuth} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-700 mb-6 transition-all disabled:opacity-50">יצירת פרופיל חדש</button>
-          <div className="relative flex py-2 items-center mb-4">
+
+          {isLoginMode && (
+            <div className="text-left mb-6">
+              <a href="/forgot-password" className="text-sm text-blue-600 hover:underline">שכחת סיסמה?</a>
+            </div>
+          )}
+
+          {isLoginMode ? (
+            <button onClick={handleLogin} disabled={isLoadingAuth} className="w-full bg-[#00a884] text-white py-3 rounded-xl font-bold hover:bg-[#008f6f] mb-3 transition-all disabled:opacity-50">
+              התחברות לחשבון
+            </button>
+          ) : (
+            <button onClick={handleSignUp} disabled={isLoadingAuth} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-700 mb-3 transition-all disabled:opacity-50">
+              הירשם עכשיו
+            </button>
+          )}
+          
+          <div className="text-center mt-2 mb-4">
+            <button 
+              onClick={() => setIsLoginMode(!isLoginMode)} 
+              className="text-sm text-gray-500 hover:text-gray-800 underline"
+            >
+              {isLoginMode ? 'אין לך חשבון? לחץ כאן להרשמה' : 'יש לך כבר חשבון? התחבר כאן'}
+            </button>
+          </div>
+
+          <div className="relative flex py-2 items-center mb-4 mt-2">
             <div className="flex-grow border-t border-gray-200"></div>
             <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">או</span>
             <div className="flex-grow border-t border-gray-200"></div>
@@ -472,6 +544,43 @@ export default function Home() {
       </div>
     );
   }
+  const handleSaveApiKey = () => {
+    if (userApiKey.trim()) {
+      localStorage.setItem('local_gemini_api_key', userApiKey.trim());
+      setIsApiKeyLocked(true);
+      alert('המפתח נשמר בדפדפן בהצלחה וננעל.');
+    } else {
+      // אם המשתמש שמר שדה ריק, נמחק את מה ששמור
+      localStorage.removeItem('local_gemini_api_key');
+      setIsApiKeyLocked(true);
+    }
+  };
+
+  const handleEditApiKey = () => {
+    setIsApiKeyLocked(false);
+  };
+  const handleSaveUserSettings = async () => {
+    if (!user) {
+      alert("יש להתחבר כדי לשמור הגדרות לחשבון.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ 
+        api_key: userApiKey,
+        preferred_model: selectedModel
+      })
+      .eq('id', user.id);
+
+    if (error) {
+      alert("אירעה שגיאה בשמירת ההגדרות.");
+      console.error(error);
+    } else {
+      alert("ההגדרות נשמרו בחשבונך בהצלחה!");
+      setIsSettingsModalOpen(false);
+    }
+  };
 
   // --- המסך הראשי ---
   return (
@@ -645,7 +754,7 @@ export default function Home() {
           systemInstruction={getCombinedSystemInstructions()}
         />
 
-        {isSettingsModalOpen && (
+     {isSettingsModalOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
               <div className="flex justify-between items-center mb-6 border-b pb-4">
@@ -674,10 +783,23 @@ export default function Home() {
                   <input
                     type="password"
                     placeholder="השאר/י ריק כדי להשתמש במפתח של האתר"
-                    className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-[#00a884] outline-none"
+                    className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-[#00a884] outline-none text-left"
+                    dir="ltr"
                     value={userApiKey}
                     onChange={(e) => setUserApiKey(e.target.value)}
                   />
+                  <p className="text-xs text-gray-500 mt-2">
+                    המפתח נשמר בצורה מאובטחת בחשבון שלך וישמש אותך בכל מחשב שממנו תתחברי.
+                  </p>
+                </div>
+                
+                <div className="pt-4 border-t border-gray-100">
+                  <button 
+                    onClick={handleSaveUserSettings} 
+                    className="w-full bg-[#00a884] text-white py-3 rounded-xl font-bold hover:bg-[#008f6f] transition-all"
+                  >
+                    שמור הגדרות לחשבון
+                  </button>
                 </div>
               </div>
             </div>
