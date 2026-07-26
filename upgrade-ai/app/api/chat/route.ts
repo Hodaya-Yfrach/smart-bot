@@ -2,9 +2,7 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 
-// ============================================================================
 // 1. הגדרות וקבועים
-// ============================================================================
 const MAX_MESSAGE_LENGTH = 8000; // הגבלת אורך הודעה - כ-1500 מילים, מונע עומס
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // חלון זמן של דקה
 const MAX_REQUESTS_PER_WINDOW = 20; // עד 20 בקשות בדקה כדי לא להקריס את השרת

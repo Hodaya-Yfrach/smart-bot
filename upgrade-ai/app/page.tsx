@@ -1,6 +1,7 @@
 "use client";
 import { verifySitePassword } from './actions';
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import ChatMessage from '@/components/ChatMessage';
 import SideModal from '@/components/SideModal';
 import Sidebar from '@/components/sideBar/sidBar';
@@ -33,6 +34,9 @@ const AVAILABLE_MODELS = [
   "gemini-3.1-flash-lite",
   "gemini-3-flash-preview"
 ];
+
+// כתובת המייל שאליה כפתור "תמיכה" יפנה - **חשוב: תחליפי כאן למייל שלך בפועל**
+const SUPPORT_EMAIL = '8564417@gmail.com';
 
 // פונקציית עזר לתרגום שגיאות Supabase לעברית מובנת
 const getHebrewAuthError = (errorMsg: string) => {
@@ -82,6 +86,8 @@ export default function Home() {
   const [isSideModalOpen, setIsSideModalOpen] = useState(false);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
+  const [supportCopied, setSupportCopied] = useState(false);
 
   const [globalRules, setGlobalRules] = useState<RuleRecord[]>([]);
   const [chatRules, setChatRules] = useState<RuleRecord[]>([]);
@@ -350,6 +356,17 @@ export default function Home() {
     setCurrentModelName(selectedModel);
   };
 
+  // מעתיק את כתובת המייל ללוח - גיבוי למקרה שאין אפליקציית מייל מוגדרת כברירת מחדל
+  const handleCopySupportEmail = async () => {
+    try {
+      await navigator.clipboard.writeText(SUPPORT_EMAIL);
+      setSupportCopied(true);
+      setTimeout(() => setSupportCopied(false), 2500);
+    } catch {
+      alert('לא הצלחנו להעתיק אוטומטית. אנא סמנו והעתיקו את הכתובת: ' + SUPPORT_EMAIL);
+    }
+  };
+
   const handleSaveUserSettings = async () => {
     if (!user) {
       alert("יש להתחבר כדי לשמור הגדרות לחשבון.");
@@ -591,6 +608,20 @@ export default function Home() {
             {user && <span className="text-xs text-gray-500">{user.email}</span>}
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={() => setIsSupportModalOpen(true)}
+              className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm"
+              title="לשלוח שאלה, רעיון או דיווח על בעיה"
+            >
+              <span className="text-lg">✉️</span> תמיכה
+            </button>
+            <Link
+              href="/about"
+              className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm"
+              title="על הפיתוח - למה ומה קיים באתר"
+            >
+              <span className="text-lg">ℹ️</span> אודות
+            </Link>
             <button onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm">
               <span className="text-lg">⚙️</span> הגדרות AI
             </button>
@@ -668,6 +699,44 @@ export default function Home() {
           userApiKey={userApiKey}
           systemInstruction={getCombinedSystemInstructions()}
         />
+
+        {isSupportModalOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
+              <div className="flex justify-between items-center mb-5 border-b pb-4">
+                <h2 className="text-xl font-bold flex items-center gap-2">✉️ תמיכה</h2>
+                <button onClick={() => setIsSupportModalOpen(false)} className="text-gray-500 hover:bg-gray-100 rounded-full w-8 h-8">✕</button>
+              </div>
+
+              <p className="text-sm text-gray-600 mb-4">
+                יש לך שאלה, רעיון, או נתקלת בבעיה? אפשר לפנות בכתובת הבאה:
+              </p>
+
+              <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+                <span dir="ltr" className="flex-1 text-sm font-medium text-gray-800 truncate">
+                  {SUPPORT_EMAIL}
+                </span>
+                <button
+                  onClick={handleCopySupportEmail}
+                  className="shrink-0 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded-lg font-medium transition-colors"
+                >
+                  {supportCopied ? '✓ הועתק' : 'העתק'}
+                </button>
+              </div>
+
+              {/* קישור mailto כאפשרות נוספת - עובד רק אם יש אפליקציית מייל מוגדרת כברירת מחדל */}
+              <a
+                href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('פנייה מתוך AI Workspace')}&body=${encodeURIComponent('שלום,\n\nיש לי שאלה / רעיון / בעיה בנוגע לאתר:\n')}`}
+                className="w-full block text-center bg-[#ec4899] text-white py-2.5 rounded-xl font-bold hover:bg-[#db2777] transition-all text-sm"
+              >
+                פתיחה באפליקציית מייל
+              </a>
+              <p className="text-xs text-gray-400 mt-3 text-center">
+                אם הכפתור לא פותח מייל אצלך, פשוט העתיקי את הכתובת ושלחי אליה הודעה מכל אפליקציית מייל.
+              </p>
+            </div>
+          </div>
+        )}
 
         {isSettingsModalOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
