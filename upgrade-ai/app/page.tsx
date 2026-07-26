@@ -3,7 +3,7 @@ import { verifySitePassword } from './actions';
 import { useState, useEffect } from 'react';
 import ChatMessage from '@/components/ChatMessage';
 import SideModal from '@/components/SideModal';
-import Sidebar from '@/components/history-bar';
+import Sidebar from '@/components/sideBar/sidBar';
 import { ChatMessage as ChatMessageType, GeminiResponse } from '@/types/chat';
 import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
@@ -570,16 +570,18 @@ export default function Home() {
     <div dir="rtl" className="flex h-[100dvh] overflow-hidden bg-[#efeae2] relative">
 
       {/* תפריט צד (Sidebar) */}
-      <Sidebar 
-        user={user}
-        chatHistory={chatHistory}
-        currentChatId={currentChatId}
-        onSelectChat={loadSingleChat}
-        onStartNewChat={startNewChat}
-        onLogout={handleLogout}
-        onDeleteChat={handleDeleteChat}
-        onUpdateTitle={handleUpdateChatTitle}
-      />
+    <Sidebar 
+  user={user}
+  chatHistory={chatHistory}
+  currentChatId={currentChatId}
+  onSelectChat={loadSingleChat}
+  onStartNewChat={startNewChat}
+  onLogout={handleLogout}
+  onDeleteChat={handleDeleteChat}
+  onUpdateTitle={handleUpdateChatTitle}
+  mainMessages={mainMessages}
+  userApiKey={userApiKey}
+/>
 
       {/* אזור התוכן המרכזי */}
       <main className="flex-1 flex flex-col relative h-full overflow-hidden">
