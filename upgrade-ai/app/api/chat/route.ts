@@ -223,21 +223,20 @@ export async function POST(req: Request) {
         }
 
         // ── מודל יצירת תמונות ───────────────────────────────────────────────
-        // DEV NOTE: מודלי image-gen דורשים responseModalities: ['Text', 'Image'].
-        // הם מחזירים parts — אחד טקסט ואחד inlineData עם התמונה.
-        // הם לא תומכים ב-startChat, לכן משתמשים ב-generateContent ישירות.
         if (isImageModel) {
-          const model = genAI.getGenerativeModel({
-            model: apiModelName,
+          const model = genAI.getGenerativeModel({ model: apiModelName });
+
+          const prompt = latestMessageText || 'צור תמונה';
+
+          // responseModalities חייב להיות ב-request ישירות (לא ב-generationConfig)
+          const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
             // @ts-ignore — responseModalities אינו בטיפוסים הרשמיים עדיין
             generationConfig: { responseModalities: ['Text', 'Image'] },
           });
 
-          const prompt = latestMessageText || 'צור תמונה';
-          const result = await model.generateContent(prompt);
           const responseParts = result.response.candidates?.[0]?.content?.parts ?? [];
 
-          // חילוץ התמונה מה-parts של התשובה
           let generatedImageBase64: string | undefined;
           let responseText = '';
           for (const part of responseParts) {
@@ -249,7 +248,7 @@ export async function POST(req: Request) {
           }
 
           if (!generatedImageBase64) {
-            // המודל לא החזיר תמונה — ממשיכים למודל הבא בתור
+            console.error(`Image model ${modelName} returned no image. Parts:`, JSON.stringify(responseParts));
             failedModels.push(modelName);
             continue;
           }
