@@ -26,6 +26,8 @@ import { ChatSummary } from '@/types/chatSummary';
 import { ModelInfo } from '@/types/models';
 import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
+import OnboardingTour, { TOUR_DONE_KEY } from '@/components/OnboardingTour';
+import type { TourStep } from '@/components/OnboardingTour';
 import { User } from '@supabase/supabase-js';
 
 // ─── טיפוסים מקומיים ─────────────────────────────────────────────────────────
@@ -41,6 +43,18 @@ interface PendingImage {
 }
 
 const DEFAULT_MODEL_ID = "gemini-3.7-flash";
+
+// ─── שלבי מדריך ההיכרות ────────────────────────────────────────────────────
+const TOUR_STEPS: TourStep[] = [
+  { targetId: 'tour-model-select',  title: 'בחירת מודל AI',        text: 'בחרי כאן את המודל שתרצי לשוחח איתו — Flash מהיר, Pro חכם יותר, ומודל התמונות יוצר תמונות מטקסט.',       position: 'top' },
+  { targetId: 'tour-image-btn',     title: 'צירוף תמונה',          text: 'לחצי כאן כדי לצרף תמונה לשאלה — המודל יוכל לנתח ולתאר אותה.',                                          position: 'top' },
+  { targetId: 'tour-send-btn',      title: 'שליחת הודעה',          text: 'Enter לשליחה מהירה, Shift+Enter לשורה חדשה. כשבוחרים מודל תמונות הכפתור הופך ל"צור".',               position: 'top' },
+  { targetId: 'tour-btn-settings',  title: 'הגדרות',               text: 'כאן מגדירים מפתח API אישי (BYOK) ומודל ברירת מחדל. המפתח נשמר מאובטח בחשבון.',                       position: 'bottom' },
+  { targetId: 'tour-btn-rules',     title: 'כללים וזיכרון',        text: 'הגדירי כללים קבועים לכל השיחות ("תמיד תענה בקצרה") או כללים ספציפיים לשיחה הנוכחית.',               position: 'bottom' },
+  { targetId: 'tour-btn-consult',   title: 'חלון התייעצות',        text: 'פאנל צדדי שמאפשר לשאול שאלות על השיחה הראשית מבלי להפריע לה — שימושי לניתוח ולהבהרות.',            position: 'bottom' },
+  { targetId: 'tour-btn-summary',   title: 'תקציר שיחה',           text: 'לאחר שיחה — לחצי כאן לקבלת תקציר חכם עם נקודות מרכזיות ומושגים חדשים. נשמר ב-DB אוטומטית.',        position: 'bottom' },
+  { targetId: 'tour-sidebar',       title: 'היסטוריית שיחות',      text: 'כאן מוצגות כל השיחות הקודמות שלך. ניתן ללחוץ לפתיחה, לערוך כותרת, או למחוק.',                       position: 'right' },
+];
 
 const getModelDisplayName = (models: ModelInfo[], name: string): string => {
   const baseName = name.replace(' (גיבוי)', '');
@@ -92,7 +106,6 @@ export default function Home() {
   const [chatHistory, setChatHistory] = useState<ChatRecord[]>([]);
   const [input, setInput] = useState('');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [savedSummary, setSavedSummary] = useState<ChatSummary | null>(null);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
 
   // 3. מודלים (Modals) וזיכרון
@@ -125,6 +138,9 @@ export default function Home() {
   // 6. תמונה ממתינה לשליחה (vision או image-gen)
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // 7. מדריך היכרות
+  const [isTourOpen, setIsTourOpen] = useState(false);
 
   /** בודק אם המודל הנבחר הוא מודל יצירת תמונות */
   const isImageGenModel = () =>
@@ -170,6 +186,14 @@ export default function Home() {
     };
     checkUser();
   }, []);
+
+  // פתיחת tour אוטומטית בפעם הראשונה (אחרי שהמשתמש מחובר/אורח)
+  useEffect(() => {
+    if ((user || isGuest) && !localStorage.getItem(TOUR_DONE_KEY)) {
+      // ממתינים frame אחד כדי שה-DOM יהיה מוכן
+      setTimeout(() => setIsTourOpen(true), 400);
+    }
+  }, [user, isGuest]);
 
   // טעינת רשימת המודלים מה-API
   useEffect(() => {
@@ -295,21 +319,17 @@ export default function Home() {
 
   const loadSingleChat = async (chatId: string) => {
     setCurrentChatId(chatId);
-    setSavedSummary(null); // מאפסים מיד - מונע הצגה רגעית של תקציר שיחה שגוי
-    const [{ data }, { data: summaryData }] = await Promise.all([
-      supabase.from('messages').select('id, role, content').eq('chat_id', chatId).order('created_at', { ascending: true }),
-      supabase.from('chat_summaries').select('summary').eq('chat_id', chatId).maybeSingle(),
-    ]);
+    const { data } = await supabase
+      .from('messages')
+      .select('id, role, content')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
     if (data) {
-      const formattedMessages: ChatMessageType[] = (data as DbMessage[]).map((msg) => ({
-        id: msg.id,
-        role: msg.role,
-        parts: [{ text: msg.content }]
-      }));
-      setMainMessages(formattedMessages);
+      setMainMessages((data as DbMessage[]).map((msg) => ({
+        id: msg.id, role: msg.role, parts: [{ text: msg.content }],
+      })));
       setCurrentModelName(selectedModel);
     }
-    setSavedSummary((summaryData?.summary as ChatSummary | undefined) || null);
   };
 
   const ensureChatExists = async (firstMessageText: string) => {
@@ -332,11 +352,10 @@ export default function Home() {
 
   const handleDeleteChat = async (chatId: string) => {
     const { error } = await supabase.from('chats').delete().eq('id', chatId);
+    // CASCADE ב-DB מוחק messages + chat_summaries אוטומטית
     if (!error) {
       setChatHistory(prev => prev.filter(c => c.id !== chatId));
-      if (currentChatId === chatId) {
-        startNewChat();
-      }
+      if (currentChatId === chatId) startNewChat();
     } else {
       alert("שגיאה במחיקת השיחה");
     }
@@ -414,19 +433,8 @@ export default function Home() {
     setCurrentChatId(null);
     setChatRules([]);
     setCurrentModelName(selectedModel);
-    setSavedSummary(null);
     setIsSummaryOpen(false);
     setEditingMessageId(null);
-  };
-
-  const saveSummary = async (summary: ChatSummary) => {
-    if (!user || !currentChatId) return;
-    const { error } = await supabase.from('chat_summaries').upsert({
-      chat_id: currentChatId,
-      summary,
-      updated_at: new Date().toISOString(),
-    });
-    if (!error) setSavedSummary(summary);
   };
 
   const editLastPrompt = async (message: ChatMessageType) => {
@@ -436,15 +444,12 @@ export default function Home() {
 
     const idsToRemove = mainMessages.slice(messageIndex).map((item) => item.id).filter(Boolean) as string[];
     const { error } = await supabase.from('messages').delete().in('id', idsToRemove);
-    if (error) {
-      alert('לא ניתן לערוך את ההודעה כרגע.');
-      return;
-    }
+    if (error) { alert('לא ניתן לערוך את ההודעה כרגע.'); return; }
 
     setMainMessages(mainMessages.slice(0, messageIndex));
     setInput(message.parts.find(p => p.text !== undefined)?.text ?? '');
     setEditingMessageId(message.id);
-    setSavedSummary(null);
+    // מוחקים תקציר ישן כי השיחה השתנתה
     await supabase.from('chat_summaries').delete().eq('chat_id', currentChatId);
   };
 
@@ -727,18 +732,20 @@ export default function Home() {
     <div dir="rtl" className="flex h-[100dvh] overflow-hidden bg-[#F8FAFC] text-slate-800 relative font-sans">
 
       {/* תפריט צד (Sidebar) */}
-      <Sidebar
-        user={user}
-        chatHistory={chatHistory}
-        currentChatId={currentChatId}
-        onSelectChat={loadSingleChat}
-        onStartNewChat={startNewChat}
-        onLogout={handleLogout}
-        onDeleteChat={handleDeleteChat}
-        onUpdateTitle={handleUpdateChatTitle}
-        mainMessages={mainMessages}
-        userApiKey={userApiKey}
-      />
+      <div data-tour-id="tour-sidebar">
+        <Sidebar
+          user={user}
+          chatHistory={chatHistory}
+          currentChatId={currentChatId}
+          onSelectChat={loadSingleChat}
+          onStartNewChat={startNewChat}
+          onLogout={handleLogout}
+          onDeleteChat={handleDeleteChat}
+          onUpdateTitle={handleUpdateChatTitle}
+          mainMessages={mainMessages}
+          userApiKey={userApiKey}
+        />
+      </div>
 
       {/* אזור התוכן המרכזי */}
       <main className="flex-1 flex flex-col relative h-full overflow-hidden bg-white">
@@ -751,6 +758,14 @@ export default function Home() {
           </div>
           
           <div className="flex gap-2 flex-wrap justify-end max-w-3xl">
+            {/* כפתור תדריך — תמיד גלוי, מאפשר הפעלה מחדש */}
+            <button
+              onClick={() => { localStorage.removeItem(TOUR_DONE_KEY); setIsTourOpen(true); }}
+              className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
+              title="הצגת מדריך היכרות"
+            >
+              <span>🗺️</span> תדריך
+            </button>
             <button
               onClick={() => setIsSupportModalOpen(true)}
               className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
@@ -765,19 +780,19 @@ export default function Home() {
             >
               <span>ℹ️</span> אודות
             </Link>
-            <button onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+            <button data-tour-id="tour-btn-settings" onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
               <span>⚙️</span> הגדרות
             </button>
             {user && (
-              <button onClick={() => setIsMemoryModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+              <button data-tour-id="tour-btn-rules" onClick={() => setIsMemoryModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
                 <span>🧠</span> כללים
               </button>
             )}
-            <button onClick={() => setIsSideModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+            <button data-tour-id="tour-btn-consult" onClick={() => setIsSideModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
               <span>💡</span> התייעצות
             </button>
             {user && currentChatId && (
-              <button onClick={() => setIsSummaryOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+              <button data-tour-id="tour-btn-summary" onClick={() => setIsSummaryOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
                 <span>📄</span> תקציר
               </button>
             )}
@@ -857,6 +872,7 @@ export default function Home() {
                   onClick={() => imageInputRef.current?.click()}
                   disabled={isWaiting || guestLimitReached}
                   title="צרף תמונה לשאלה"
+                  data-tour-id="tour-image-btn"
                   className="h-[56px] w-[56px] shrink-0 bg-slate-50 border border-slate-200 rounded-2xl hover:bg-teal-50 hover:border-teal-300 text-slate-500 hover:text-teal-600 transition-all flex items-center justify-center text-xl disabled:opacity-40"
                 >
                   🖼️
@@ -884,6 +900,7 @@ export default function Home() {
             <button
               onClick={handleMainSend}
               disabled={isWaiting || guestLimitReached || (!input.trim() && !pendingImage && !isImageGenModel())}
+              data-tour-id="tour-send-btn"
               className="h-[56px] bg-slate-800 text-white px-8 rounded-2xl hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 font-bold transition-all duration-300 shadow-md disabled:bg-slate-300 disabled:text-slate-500 disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2 group"
             >
               <span>{isImageGenModel() ? 'צור' : 'שלח'}</span>
@@ -896,6 +913,7 @@ export default function Home() {
               <span className="font-medium group-hover:text-slate-700 transition-colors">מודל פעיל:</span>
               <select
                 className="max-w-40 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
+                data-tour-id="tour-model-select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
                 disabled={modelsLoading}
@@ -949,8 +967,6 @@ export default function Home() {
             chatTitle={chatHistory.find((chat) => chat.id === currentChatId)?.title || 'שיחה'}
             messages={mainMessages}
             userApiKey={userApiKey}
-            savedSummary={savedSummary}
-            onSaveSummary={saveSummary}
           />
         )}
 
@@ -1146,6 +1162,13 @@ export default function Home() {
           </div>
         )}
       </main>
+      {/* מדריך היכרות */}
+      {isTourOpen && (
+        <OnboardingTour
+          steps={TOUR_STEPS}
+          onDone={() => setIsTourOpen(false)}
+        />
+      )}
     </div>
   );
 }

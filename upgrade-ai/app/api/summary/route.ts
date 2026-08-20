@@ -9,7 +9,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 
 // ─── קבועים ──────────────────────────────────────────────────────────────────
-const MAX_MESSAGE_CHARS = 4000; // הגנה מפני הודעה בודדת ענקית שמנפחת את הבקשה
+const MAX_TRANSCRIPT_MESSAGES = 60;
+const MAX_MESSAGE_CHARS = 4000;
 const SIMPLE_SUMMARY_MODEL = 'gemini-flash-lite-latest';
 const summaryRequestSchema = z.object({
   messages: z.array(
