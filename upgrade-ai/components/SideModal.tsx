@@ -1,5 +1,12 @@
 "use client";
 
+// =============================================================================
+// components/SideModal.tsx — חלון התייעצות צדדי
+// פאנל שנפתח מימין ומאפשר לשאול שאלות על השיחה הראשית מבלי להשפיע עליה.
+// מקבל את mainContext (היסטוריית הצ'אט הראשי) ומשתמש בו כהקשר.
+// DEV NOTE: כל ה-state כאן מקומי — הודעות חלון ההתייעצות לא נשמרות ב-DB.
+// =============================================================================
+
 import React, { useState, useEffect } from 'react';
 import ChatMessage from './ChatMessage';
 import { ChatMessage as ChatMessageType } from '@/types/chat';
@@ -48,7 +55,7 @@ export default function SideModal({ isOpen, onClose, mainContext, selectedModel,
         : "אתה עוזר AI בחלון התייעצות צדדי. עזור למשתמש לנתח את השיחה הראשית.";
       
       const response = await askGemini(
-        userMessage.parts[0].text, 
+        userMessage.parts[0].text ?? '',
         fullContext, 
         finalInstruction, 
         selectedModel, 

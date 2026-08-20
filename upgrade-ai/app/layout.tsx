@@ -1,3 +1,8 @@
+// =============================================================================
+// app/layout.tsx — Root Layout (Server Component)
+// עוטף את כל הדפים: מגדיר פונטים, metadata, כיווניות RTL, ו-footer גלובלי.
+// DEV NOTE: שנו את metadata.title/description לפרויקט שלכם.
+// =============================================================================
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";

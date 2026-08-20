@@ -1,5 +1,21 @@
+// =============================================================================
+// app/page.tsx — דף הבית הראשי (Client Component)
+//
+// אחראי על:
+//   - מסך התחברות / הרשמה / אורח
+//   - ממשק הצ'אט: שליחת הודעות, היסטוריה, עריכת הודעה אחרונה
+//   - העלאת תמונה לקלט (vision) ויצירת תמונה (image-gen)
+//   - ניהול כללים (גלובליים + לשיחה), הגדרות BYOK, תקציר שיחה
+//
+// DEV NOTE — תמיכה בתמונות:
+//   pendingImage מחזיק את התמונה שהמשתמש בחר (base64 + mimeType + previewUrl).
+//   בשליחה: אם selectedModel הוא image-gen — שולחים isImageModel=true לשרת
+//   שיצור תמונה. אחרת שולחים את התמונה כ-inlineData ל-vision.
+//   תמונות לא נשמרות בסופאבייס (נשמר רק הטקסט).
+// =============================================================================
+
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import ChatMessage from '@/components/ChatMessage';
 import SideModal from '@/components/SideModal';
@@ -10,27 +26,35 @@ import { ChatSummary } from '@/types/chatSummary';
 import { ModelInfo } from '@/types/models';
 import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
+import OnboardingTour, { TOUR_DONE_KEY } from '@/components/OnboardingTour';
+import type { TourStep } from '@/components/OnboardingTour';
 import { User } from '@supabase/supabase-js';
 
-// --- הגדרות טיפוסים מקומיות למניעת שגיאות TS ---
-interface RuleRecord {
-  id: string;
-  rule_text: string;
-}
+// ─── טיפוסים מקומיים ─────────────────────────────────────────────────────────
+interface RuleRecord { id: string; rule_text: string; }
+interface ChatRecord  { id: string; title: string; created_at: string; }
+interface DbMessage   { id: string; role: 'user' | 'model'; content: string; }
 
-interface ChatRecord {
-  id: string;
-  title: string;
-  created_at: string;
-}
-
-interface DbMessage {
-  id: string;
-  role: 'user' | 'model';
-  content: string;
+/** תמונה שהמשתמש בחר לפני השליחה */
+interface PendingImage {
+  base64: string;      // ללא prefix
+  mimeType: string;    // image/jpeg | image/png | image/webp
+  previewUrl: string;  // blob: URL להצגה ב-UI
 }
 
 const DEFAULT_MODEL_ID = "gemini-3.7-flash";
+
+// ─── שלבי מדריך ההיכרות ────────────────────────────────────────────────────
+const TOUR_STEPS: TourStep[] = [
+  { targetId: 'tour-model-select',  title: 'בחירת מודל AI',        text: 'בחרי כאן את המודל שתרצי לשוחח איתו — Flash מהיר, Pro חכם יותר, ומודל התמונות יוצר תמונות מטקסט.',       position: 'top' },
+  { targetId: 'tour-image-btn',     title: 'צירוף תמונה',          text: 'לחצי כאן כדי לצרף תמונה לשאלה — המודל יוכל לנתח ולתאר אותה.',                                          position: 'top' },
+  { targetId: 'tour-send-btn',      title: 'שליחת הודעה',          text: 'Enter לשליחה מהירה, Shift+Enter לשורה חדשה. כשבוחרים מודל תמונות הכפתור הופך ל"צור".',               position: 'top' },
+  { targetId: 'tour-btn-settings',  title: 'הגדרות',               text: 'כאן מגדירים מפתח API אישי (BYOK) ומודל ברירת מחדל. המפתח נשמר מאובטח בחשבון.',                       position: 'bottom' },
+  { targetId: 'tour-btn-rules',     title: 'כללים וזיכרון',        text: 'הגדירי כללים קבועים לכל השיחות ("תמיד תענה בקצרה") או כללים ספציפיים לשיחה הנוכחית.',               position: 'bottom' },
+  { targetId: 'tour-btn-consult',   title: 'חלון התייעצות',        text: 'פאנל צדדי שמאפשר לשאול שאלות על השיחה הראשית מבלי להפריע לה — שימושי לניתוח ולהבהרות.',            position: 'bottom' },
+  { targetId: 'tour-btn-summary',   title: 'תקציר שיחה',           text: 'לאחר שיחה — לחצי כאן לקבלת תקציר חכם עם נקודות מרכזיות ומושגים חדשים. נשמר ב-DB אוטומטית.',        position: 'bottom' },
+  { targetId: 'tour-sidebar',       title: 'היסטוריית שיחות',      text: 'כאן מוצגות כל השיחות הקודמות שלך. ניתן ללחוץ לפתיחה, לערוך כותרת, או למחוק.',                       position: 'right' },
+];
 
 const getModelDisplayName = (models: ModelInfo[], name: string): string => {
   const baseName = name.replace(' (גיבוי)', '');
@@ -39,10 +63,10 @@ const getModelDisplayName = (models: ModelInfo[], name: string): string => {
   return name.includes(' (גיבוי)') ? `${displayName} (גיבוי)` : displayName;
 };
 
-// כתובת המייל שאליה כפתור "תמיכה" יפנה - **חשוב: תחליפי כאן למייל שלך בפועל**
+// DEV NOTE: החלף למייל שלך
 const SUPPORT_EMAIL = '8564417@gmail.com';
 
-// פונקציית עזר לתרגום שגיאות Supabase לעברית מובנת
+// תרגום שגיאות Supabase לעברית
 const getHebrewAuthError = (errorMsg: string) => {
   const msg = errorMsg.toLowerCase();
 
@@ -82,7 +106,6 @@ export default function Home() {
   const [chatHistory, setChatHistory] = useState<ChatRecord[]>([]);
   const [input, setInput] = useState('');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [savedSummary, setSavedSummary] = useState<ChatSummary | null>(null);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
 
   // 3. מודלים (Modals) וזיכרון
@@ -112,7 +135,35 @@ export default function Home() {
   const [isApiKeyLocked, setIsApiKeyLocked] = useState(false);
   const [currentModelName, setCurrentModelName] = useState(DEFAULT_MODEL_ID);
 
+  // 6. תמונה ממתינה לשליחה (vision או image-gen)
+  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // 7. מדריך היכרות
+  const [isTourOpen, setIsTourOpen] = useState(false);
+
+  /** בודק אם המודל הנבחר הוא מודל יצירת תמונות */
+  const isImageGenModel = () =>
+    availableModels.find(m => m.id === selectedModel)?.capabilities.includes('image-gen') ?? false;
+
   const guestLimitReached = isGuest && mainMessages.some(msg => msg.role === 'user');
+
+  /** קריאת קובץ תמונה שהמשתמש בחר והמרתו ל-base64 */
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      // מסירים את prefix "data:image/...;base64,"
+      const base64 = dataUrl.split(',')[1];
+      setPendingImage({ base64, mimeType: file.type, previewUrl });
+    };
+    reader.readAsDataURL(file);
+    // מאפסים כדי שניתן לבחור את אותו קובץ שוב
+    e.target.value = '';
+  };
 
   // פונקציית עזר לבניית הוראות המערכת המאוחדות
   const getCombinedSystemInstructions = () => {
@@ -135,6 +186,14 @@ export default function Home() {
     };
     checkUser();
   }, []);
+
+  // פתיחת tour אוטומטית בפעם הראשונה (אחרי שהמשתמש מחובר/אורח)
+  useEffect(() => {
+    if ((user || isGuest) && !localStorage.getItem(TOUR_DONE_KEY)) {
+      // ממתינים frame אחד כדי שה-DOM יהיה מוכן
+      setTimeout(() => setIsTourOpen(true), 400);
+    }
+  }, [user, isGuest]);
 
   // טעינת רשימת המודלים מה-API
   useEffect(() => {
@@ -260,21 +319,17 @@ export default function Home() {
 
   const loadSingleChat = async (chatId: string) => {
     setCurrentChatId(chatId);
-    setSavedSummary(null); // מאפסים מיד - מונע הצגה רגעית של תקציר שיחה שגוי
-    const [{ data }, { data: summaryData }] = await Promise.all([
-      supabase.from('messages').select('id, role, content').eq('chat_id', chatId).order('created_at', { ascending: true }),
-      supabase.from('chat_summaries').select('summary').eq('chat_id', chatId).maybeSingle(),
-    ]);
+    const { data } = await supabase
+      .from('messages')
+      .select('id, role, content')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
     if (data) {
-      const formattedMessages: ChatMessageType[] = (data as DbMessage[]).map((msg) => ({
-        id: msg.id,
-        role: msg.role,
-        parts: [{ text: msg.content }]
-      }));
-      setMainMessages(formattedMessages);
+      setMainMessages((data as DbMessage[]).map((msg) => ({
+        id: msg.id, role: msg.role, parts: [{ text: msg.content }],
+      })));
       setCurrentModelName(selectedModel);
     }
-    setSavedSummary((summaryData?.summary as ChatSummary | undefined) || null);
   };
 
   const ensureChatExists = async (firstMessageText: string) => {
@@ -297,11 +352,10 @@ export default function Home() {
 
   const handleDeleteChat = async (chatId: string) => {
     const { error } = await supabase.from('chats').delete().eq('id', chatId);
+    // CASCADE ב-DB מוחק messages + chat_summaries אוטומטית
     if (!error) {
       setChatHistory(prev => prev.filter(c => c.id !== chatId));
-      if (currentChatId === chatId) {
-        startNewChat();
-      }
+      if (currentChatId === chatId) startNewChat();
     } else {
       alert("שגיאה במחיקת השיחה");
     }
@@ -379,19 +433,8 @@ export default function Home() {
     setCurrentChatId(null);
     setChatRules([]);
     setCurrentModelName(selectedModel);
-    setSavedSummary(null);
     setIsSummaryOpen(false);
     setEditingMessageId(null);
-  };
-
-  const saveSummary = async (summary: ChatSummary) => {
-    if (!user || !currentChatId) return;
-    const { error } = await supabase.from('chat_summaries').upsert({
-      chat_id: currentChatId,
-      summary,
-      updated_at: new Date().toISOString(),
-    });
-    if (!error) setSavedSummary(summary);
   };
 
   const editLastPrompt = async (message: ChatMessageType) => {
@@ -401,15 +444,12 @@ export default function Home() {
 
     const idsToRemove = mainMessages.slice(messageIndex).map((item) => item.id).filter(Boolean) as string[];
     const { error } = await supabase.from('messages').delete().in('id', idsToRemove);
-    if (error) {
-      alert('לא ניתן לערוך את ההודעה כרגע.');
-      return;
-    }
+    if (error) { alert('לא ניתן לערוך את ההודעה כרגע.'); return; }
 
     setMainMessages(mainMessages.slice(0, messageIndex));
-    setInput(message.parts[0].text);
+    setInput(message.parts.find(p => p.text !== undefined)?.text ?? '');
     setEditingMessageId(message.id);
-    setSavedSummary(null);
+    // מוחקים תקציר ישן כי השיחה השתנתה
     await supabase.from('chat_summaries').delete().eq('chat_id', currentChatId);
   };
 
@@ -467,24 +507,40 @@ export default function Home() {
       return;
     }
 
-    if (!input.trim() || isWaiting) return;
+    // מודל תמונה: מאפשר שליחה גם ללא טקסט (רק prompt ריק → "צור תמונה")
+    if (!input.trim() && !pendingImage && !isImageGenModel()) return;
+    if (isWaiting) return;
 
     const userText = input;
-    const userMessage: ChatMessageType = { role: 'user', parts: [{ text: userText }] };
+    const imageSnapshot = pendingImage; // שומרים לפני ניקוי ה-state
+
+    // בניית ה-parts להצגה ב-UI
+    const userParts: ChatMessageType['parts'] = [];
+    if (imageSnapshot) {
+      userParts.push({ imageUrl: imageSnapshot.previewUrl, inlineData: { mimeType: imageSnapshot.mimeType, data: imageSnapshot.base64 } });
+    }
+    if (userText.trim()) userParts.push({ text: userText });
+
+    const userMessage: ChatMessageType = {
+      role: 'user',
+      parts: userParts.length > 0 ? userParts : [{ text: '' }],
+    };
 
     setMainMessages(prev => [...prev, userMessage]);
     setInput('');
+    setPendingImage(null); // מנקים את התמונה הממתינה
     setIsWaiting(true);
     setCountdown(15);
 
     try {
       let activeChatId = currentChatId;
       if (user) {
-        activeChatId = await ensureChatExists(userText);
+        activeChatId = await ensureChatExists(userText || '🖼️ תמונה');
         if (activeChatId) {
+          // שומרים בסופאבייס רק את הטקסט (תמונות לא נשמרות ב-DB כרגע)
           const { data: savedUserMessage } = await supabase
             .from('messages')
-            .insert([{ chat_id: activeChatId, role: 'user', content: userText }])
+            .insert([{ chat_id: activeChatId, role: 'user', content: userText || '[תמונה]' }])
             .select('id')
             .single();
           if (savedUserMessage) {
@@ -500,6 +556,8 @@ export default function Home() {
         .map(m => m.id)
         .filter(m => m !== selectedModel && !disabledModels.includes(m));
 
+      const imageGen = isImageGenModel();
+
       const response: GeminiResponse = await askGemini(
         userText,
         mainMessages,
@@ -507,10 +565,21 @@ export default function Home() {
         selectedModel,
         fallbackModels,
         userApiKey,
-        isGuest
+        isGuest,
+        imageSnapshot?.base64,
+        imageSnapshot?.mimeType,
+        imageGen,
       );
 
-      const modelMessage: ChatMessageType = { role: 'model', parts: [{ text: response.text }] };
+      // בניית ה-parts של התשובה (טקסט + תמונה שנוצרה אם יש)
+      const modelParts: ChatMessageType['parts'] = [];
+      if (response.generatedImage) modelParts.push({ generatedImage: response.generatedImage });
+      if (response.text?.trim()) modelParts.push({ text: response.text });
+
+      const modelMessage: ChatMessageType = {
+        role: 'model',
+        parts: modelParts.length > 0 ? modelParts : [{ text: response.text }],
+      };
       setMainMessages(prev => [...prev, modelMessage]);
 
       if (user && activeChatId) {
@@ -543,7 +612,6 @@ export default function Home() {
 
     } catch (error: unknown) {
       console.error("שגיאה בצ'אט הראשי:", error);
-
       if (error instanceof ChatApiError) {
         alert(error.message);
         if (error.failedModels.length > 0) {
@@ -664,18 +732,20 @@ export default function Home() {
     <div dir="rtl" className="flex h-[100dvh] overflow-hidden bg-[#F8FAFC] text-slate-800 relative font-sans">
 
       {/* תפריט צד (Sidebar) */}
-      <Sidebar
-        user={user}
-        chatHistory={chatHistory}
-        currentChatId={currentChatId}
-        onSelectChat={loadSingleChat}
-        onStartNewChat={startNewChat}
-        onLogout={handleLogout}
-        onDeleteChat={handleDeleteChat}
-        onUpdateTitle={handleUpdateChatTitle}
-        mainMessages={mainMessages}
-        userApiKey={userApiKey}
-      />
+      <div data-tour-id="tour-sidebar">
+        <Sidebar
+          user={user}
+          chatHistory={chatHistory}
+          currentChatId={currentChatId}
+          onSelectChat={loadSingleChat}
+          onStartNewChat={startNewChat}
+          onLogout={handleLogout}
+          onDeleteChat={handleDeleteChat}
+          onUpdateTitle={handleUpdateChatTitle}
+          mainMessages={mainMessages}
+          userApiKey={userApiKey}
+        />
+      </div>
 
       {/* אזור התוכן המרכזי */}
       <main className="flex-1 flex flex-col relative h-full overflow-hidden bg-white">
@@ -688,6 +758,14 @@ export default function Home() {
           </div>
           
           <div className="flex gap-2 flex-wrap justify-end max-w-3xl">
+            {/* כפתור תדריך — תמיד גלוי, מאפשר הפעלה מחדש */}
+            <button
+              onClick={() => { localStorage.removeItem(TOUR_DONE_KEY); setIsTourOpen(true); }}
+              className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
+              title="הצגת מדריך היכרות"
+            >
+              <span>🗺️</span> תדריך
+            </button>
             <button
               onClick={() => setIsSupportModalOpen(true)}
               className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
@@ -702,19 +780,19 @@ export default function Home() {
             >
               <span>ℹ️</span> אודות
             </Link>
-            <button onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+            <button data-tour-id="tour-btn-settings" onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
               <span>⚙️</span> הגדרות
             </button>
             {user && (
-              <button onClick={() => setIsMemoryModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+              <button data-tour-id="tour-btn-rules" onClick={() => setIsMemoryModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
                 <span>🧠</span> כללים
               </button>
             )}
-            <button onClick={() => setIsSideModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+            <button data-tour-id="tour-btn-consult" onClick={() => setIsSideModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
               <span>💡</span> התייעצות
             </button>
             {user && currentChatId && (
-              <button onClick={() => setIsSummaryOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+              <button data-tour-id="tour-btn-summary" onClick={() => setIsSummaryOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
                 <span>📄</span> תקציר
               </button>
             )}
@@ -762,9 +840,45 @@ export default function Home() {
           </div>
         </div>
 
-        {/* סרגל הקלדה צף ויוקרתי */}
+        {/* סרגל הקלדה */}
         <div className="bg-white/90 backdrop-blur-lg border-t border-slate-200 p-4 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-20 relative">
+          
+          {/* תצוגה מקדימה של תמונה ממתינה */}
+          {pendingImage && (
+            <div className="w-full max-w-3xl mb-2 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={pendingImage.previewUrl} alt="תמונה נבחרת" className="h-14 w-14 object-cover rounded-xl shrink-0" />
+              <span className="text-sm text-slate-600 flex-1 font-medium truncate">תמונה מצורפת</span>
+              <button
+                onClick={() => { setPendingImage(null); URL.revokeObjectURL(pendingImage.previewUrl); }}
+                className="text-slate-400 hover:text-red-500 transition-colors text-lg"
+                title="הסרת תמונה"
+              >✕</button>
+            </div>
+          )}
+
           <div className="w-full max-w-3xl flex items-end gap-3 mb-3 relative">
+            {/* כפתור העלאת תמונה (נסתר אם מודל image-gen) */}
+            {!isImageGenModel() && (
+              <>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  onChange={handleImageSelect}
+                />
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={isWaiting || guestLimitReached}
+                  title="צרף תמונה לשאלה"
+                  data-tour-id="tour-image-btn"
+                  className="h-[56px] w-[56px] shrink-0 bg-slate-50 border border-slate-200 rounded-2xl hover:bg-teal-50 hover:border-teal-300 text-slate-500 hover:text-teal-600 transition-all flex items-center justify-center text-xl disabled:opacity-40"
+                >
+                  🖼️
+                </button>
+              </>
+            )}
             <textarea
               rows={1}
               className="flex-1 min-h-[56px] max-h-40 resize-y p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:bg-white focus:ring-4 focus:ring-teal-500/15 focus:border-teal-400 shadow-inner text-base transition-all duration-300 disabled:opacity-50 disabled:bg-slate-100 leading-relaxed"
@@ -776,15 +890,20 @@ export default function Home() {
                   handleMainSend();
                 }
               }}
-              placeholder={guestLimitReached ? "הגעת למגבלת השאלות לאורח 🔒" : "מה נרצה לדעת או ליצור היום?..."}
+              placeholder={
+                guestLimitReached ? "הגעת למגבלת השאלות לאורח 🔒"
+                : isImageGenModel() ? "תאר תמונה ליצירה..."
+                : "מה נרצה לדעת או ליצור היום?..."
+              }
               disabled={isWaiting || guestLimitReached}
             />
             <button
               onClick={handleMainSend}
-              disabled={isWaiting || guestLimitReached || !input.trim()}
+              disabled={isWaiting || guestLimitReached || (!input.trim() && !pendingImage && !isImageGenModel())}
+              data-tour-id="tour-send-btn"
               className="h-[56px] bg-slate-800 text-white px-8 rounded-2xl hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 font-bold transition-all duration-300 shadow-md disabled:bg-slate-300 disabled:text-slate-500 disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2 group"
             >
-              <span>שלח</span>
+              <span>{isImageGenModel() ? 'צור' : 'שלח'}</span>
               <span className="group-hover:translate-x-1 transition-transform rtl:group-hover:-translate-x-1">←</span>
             </button>
           </div>
@@ -794,6 +913,7 @@ export default function Home() {
               <span className="font-medium group-hover:text-slate-700 transition-colors">מודל פעיל:</span>
               <select
                 className="max-w-40 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
+                data-tour-id="tour-model-select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
                 disabled={modelsLoading}
@@ -847,8 +967,6 @@ export default function Home() {
             chatTitle={chatHistory.find((chat) => chat.id === currentChatId)?.title || 'שיחה'}
             messages={mainMessages}
             userApiKey={userApiKey}
-            savedSummary={savedSummary}
-            onSaveSummary={saveSummary}
           />
         )}
 
@@ -1044,6 +1162,13 @@ export default function Home() {
           </div>
         )}
       </main>
+      {/* מדריך היכרות */}
+      {isTourOpen && (
+        <OnboardingTour
+          steps={TOUR_STEPS}
+          onDone={() => setIsTourOpen(false)}
+        />
+      )}
     </div>
   );
 }

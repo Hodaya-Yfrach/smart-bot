@@ -1,11 +1,16 @@
+// =============================================================================
+// app/api/summary/route.ts — POST /api/summary
+// יוצר תקציר מובנה (JSON) לשיחה שלמה באמצעות מודל קל (Flash-Lite).
+// מחזיר: turns, oneLineSummary, overallSummary, newTerms.
+// DEV NOTE: תמיד רץ על SIMPLE_SUMMARY_MODEL ללא קשר למודל הצ'אט הראשי.
+// =============================================================================
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
-// ============================================================================
-// הגדרות
-// ============================================================================
-const MAX_TRANSCRIPT_MESSAGES = 60; // כדי לא לשלוח שיחות ענק למודל הסיכום
-const MAX_MESSAGE_CHARS = 4000; // הגנה מפני הודעה בודדת ענקית שמנפחת את הבקשה
+
+// ─── קבועים ──────────────────────────────────────────────────────────────────
+const MAX_TRANSCRIPT_MESSAGES = 60;
+const MAX_MESSAGE_CHARS = 4000;
 const SIMPLE_SUMMARY_MODEL = 'gemini-flash-lite-latest';
 const summaryRequestSchema = z.object({
   messages: z.array(

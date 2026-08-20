@@ -1,5 +1,12 @@
 "use client";
 
+// =============================================================================
+// components/sideBar/sidBar.tsx — סרגל הצד
+// מציג את היסטוריית השיחות, כפתור שיחה חדשה, ופרטי משתמש.
+// ניתן לכווץ (collapsed = אייקונים בלבד) ולהרחיב.
+// DEV NOTE: כל הלוגיקה של DB מועברת כ-callbacks מ-page.tsx — הקומפוננטה טהורה.
+// =============================================================================
+
 import { useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { ChatMessage as ChatMessageType } from '@/types/chat';

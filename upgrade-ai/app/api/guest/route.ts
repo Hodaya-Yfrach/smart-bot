@@ -1,3 +1,15 @@
+// =============================================================================
+// app/api/guest/route.ts — POST /api/guest
+// מנפיק cookie חתום (HMAC-SHA256) לגישת אורח חד-פעמית.
+//
+// זרימה:
+//   1. בדיקה שאין כבר cookie תקף → אם יש, מחזיר ok ישר.
+//   2. בדיקת IP — כל IP מקבל אסימון אחד בלבד (per-process).
+//   3. יצירת token חתום + הגדרתו כ-httpOnly cookie (TTL: 24 שעות).
+//
+// DEV NOTE: issuedGuestIps ו-consumedGuestTokens הם in-memory —
+//           ב-production עם מספר instances יש להשתמש ב-Redis.
+// =============================================================================
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
