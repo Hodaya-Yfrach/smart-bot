@@ -5,22 +5,52 @@
 }
 
 body {
-  background: #efeae2;
+  background: #f0f4ff;
   color: #0f172a;
 }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
+button, input, textarea, select { font: inherit; }
 
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 3px solid #dcf8c6;
+  outline: 3px solid #818cf8;
   outline-offset: 2px;
 }
+
+/* ── אנימציות ─────────────────────────────────────────────── */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes gradient-x {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
+}
+/* בועת חשיבה — זרימת צבע סגול-כחול-ירוק */
+@keyframes thinking-flow {
+  0%   { background-position: 0%   50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0%   50%; }
+}
+/* נקודות מנוחה */
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0);    opacity: .5; }
+  40%            { transform: translateY(-6px); opacity: 1;  }
+}
+
+.animate-fade-in        { animation: fade-in     .35s ease both; }
+.animate-fade-in-up     { animation: fade-in-up  .4s  ease both; }
+.animate-gradient-x     { background-size: 200% 200%; animation: gradient-x 3s ease infinite; }
+.animate-thinking-flow  { background-size: 300% 300%; animation: thinking-flow 4s ease infinite; }
+
+.dot-1 { animation: dot-bounce 1.4s ease infinite .0s; }
+.dot-2 { animation: dot-bounce 1.4s ease infinite .2s; }
+.dot-3 { animation: dot-bounce 1.4s ease infinite .4s; }

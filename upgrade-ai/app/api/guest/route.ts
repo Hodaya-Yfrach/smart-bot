@@ -15,7 +15,6 @@ import { NextResponse } from 'next/server';
 
 const COOKIE_NAME = 'guest_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-const issuedGuestIps = new Set<string>();
 
 function getSecret() {
   const secret = process.env.GUEST_COOKIE_SECRET;
@@ -51,13 +50,9 @@ export async function POST(req: Request) {
     const existingToken = req.headers.get('cookie')?.match(new RegExp(`${COOKIE_NAME}=([^;]+)`))?.[1];
     if (isValidToken(existingToken)) return NextResponse.json({ ok: true });
 
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'anonymous';
-    if (issuedGuestIps.has(ip)) {
-      return NextResponse.json({ error: 'כבר הופעלה גישת אורח מהמכשיר הזה.' }, { status: 403 });
-    }
-
+    // IP-based limiting הוסר — ב-Vercel serverless כל instance הוא נפרד
+    // האבטחה מסתמכת על ה-cookie החתום + צריכה חד-פעמית ב-/api/chat
     const token = createToken();
-    issuedGuestIps.add(ip);
     const response = NextResponse.json({ ok: true });
     response.cookies.set(COOKIE_NAME, token, {
       httpOnly: true,

@@ -76,8 +76,9 @@ const chatRequestSchema = z.object({
 // DEV NOTE: בסביבת production עם מספר instances השתמשו ב-Redis במקום.
 const rateLimitMap = new Map<string, { count: number; startTime: number }>();
 
-/** אסימוני אורח שכבר נוצלו — מונע שימוש כפול */
-const consumedGuestTokens = new Set<string>();
+/** אסימוני אורח שכבר נוצלו — לא בשימוש בסביבת Vercel (serverless, multi-instance) */
+// DEV NOTE: ההגבלה לשאלה אחת נאכפת בצד הלקוח דרך guestLimitReached ב-page.tsx.
+// const consumedGuestTokens = new Set<string>();
 
 // ─── פונקציית עזר: אימות JWT של Supabase ─────────────────────────────────────
 async function isAuthenticated(accessToken: string | null) {
@@ -159,7 +160,7 @@ export async function POST(req: Request) {
     const guestToken = (await cookies()).get(COOKIE_NAME)?.value;
 
     if (isGuest) {
-      if (!isValidToken(guestToken) || consumedGuestTokens.has(guestToken!)) {
+      if (!isValidToken(guestToken)) {
         return NextResponse.json(
           { error: 'מגבלת האורח נוצלה. התחברו כדי להמשיך.' },
           { status: 403 }
@@ -248,12 +249,12 @@ export async function POST(req: Request) {
           }
 
           if (!generatedImageBase64) {
-            console.error(`Image model ${modelName} returned no image. Parts:`, JSON.stringify(responseParts));
+            console.error(`Image model ${modelName} returned no image. Parts count: ${responseParts.length}, Parts:`, JSON.stringify(responseParts).slice(0, 500));
             failedModels.push(modelName);
             continue;
           }
 
-          if (isGuest && guestToken) consumedGuestTokens.add(guestToken);
+          if (isGuest && guestToken) { /* שמירת token נוצלה — מנוהל בצד לקוח */ }
           return NextResponse.json({
             text: responseText || '\u200F',
             generatedImage: generatedImageBase64,
@@ -270,7 +271,7 @@ export async function POST(req: Request) {
         const result = await chat.sendMessage(latestParts.length > 0 ? latestParts : latestMessageText);
         const cleanedText = result.response.text().replace(/^\s*[\r\n]+/, '').trim();
 
-        if (isGuest && guestToken) consumedGuestTokens.add(guestToken);
+        if (isGuest && guestToken) { /* שמירת token נוצלה — מנוהל בצד לקוח */ }
         return NextResponse.json({
           text: '\u200F' + cleanedText,
           modelUsed: modelName,
@@ -280,6 +281,13 @@ export async function POST(req: Request) {
       } catch (err: any) {
         const errorMessage = err?.message || 'Unknown error';
         console.error(`Gemini request failed for ${modelName}:`, errorMessage);
+        // בעת יצירת תמונה — מחזירים את שגיאת ה-API המקורית ישירות
+        if (isImageModel) {
+          return NextResponse.json({
+            error: `שגיאה מ-Gemini Image API: ${errorMessage}`,
+            failedModels: [modelName],
+          }, { status: 503 });
+        }
         failedModels.push(modelName);
 
         // NetFree חוסם את Gemini — אין טעם לנסות מודלים נוספים

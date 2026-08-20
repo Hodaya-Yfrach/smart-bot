@@ -492,12 +492,17 @@ export default function Home() {
   };
 
   const enterAsGuest = async () => {
-    const response = await fetch('/api/guest', { method: 'POST' });
-    if (response.ok) {
-      setIsGuest(true);
-      return;
+    try {
+      const response = await fetch('/api/guest', { method: 'POST', credentials: 'include' });
+      const data = await response.json().catch(() => null);
+      if (response.ok) {
+        setIsGuest(true);
+        return;
+      }
+      alert(data?.error || 'לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
+    } catch {
+      alert('לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
     }
-    alert('לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
   };
 
   // --- Chat ---
@@ -634,94 +639,76 @@ export default function Home() {
   // --- רינדור מסך התחברות / הרשמה ---
   if (!user && !isGuest) {
     return (
-      <div dir="rtl" className="flex h-[100dvh] items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-teal-50 px-4">
-        <div className="p-10 bg-white/70 backdrop-blur-xl rounded-[2rem] shadow-[0_20px_60px_rgba(0,0,0,0.08)] w-full max-w-sm border border-white/60 relative overflow-hidden">
-          {/* רקע דקורטיבי עדין בפנים */}
-          <div className="absolute -top-24 -right-24 w-48 h-48 bg-teal-100/40 rounded-full blur-3xl -z-10"></div>
-          <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-indigo-100/40 rounded-full blur-3xl -z-10"></div>
+      <div dir="rtl" className="flex h-[100dvh] items-center justify-center px-4 bg-gradient-to-br from-slate-50 via-violet-50/40 to-blue-50/40">
 
-          <div className="w-20 h-20 bg-gradient-to-tr from-slate-800 to-slate-700 rounded-2xl flex items-center justify-center mx-auto mb-6 text-4xl shadow-lg shadow-slate-800/20 text-white transform rotate-3">👤</div>
-          <h1 className="text-2xl font-extrabold text-slate-800 mb-8 text-center tracking-tight">
-            {isLoginMode ? 'ברוכים השבים' : 'יצירת חשבון'}
-          </h1>
-
-          <div className="space-y-4">
-            {!isLoginMode && (
-              <>
-                <input
-                  type="text"
-                  placeholder="שם מלא (חובה)"
-                  className="w-full p-4 bg-white/50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 text-right transition-all shadow-sm"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                />
-                <input
-                  type="tel"
-                  placeholder="מספר טלפון (חובה)"
-                  className="w-full p-4 bg-white/50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 text-right transition-all shadow-sm"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                />
-              </>
-            )}
-
-            <input
-              type="email"
-              placeholder="אימייל (אישי)"
-              className="w-full p-4 bg-white/50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 text-right transition-all shadow-sm"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <input
-              type="password"
-              placeholder="סיסמה (לפחות 6 תווים)"
-              className="w-full p-4 bg-white/50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 text-right transition-all shadow-sm"
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  isLoginMode ? handleLogin() : handleSignUp();
-                }
-              }}
-            />
-          </div>
-
-          {isLoginMode && (
-            <div className="text-left mt-3 mb-6">
-              <a href="/forgot-password" className="text-sm text-slate-500 hover:text-teal-600 transition-colors font-medium">שכחת סיסמה?</a>
+        <div className="w-full max-w-sm">
+          {/* לוגו + כותרת */}
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center text-3xl shadow-lg shadow-violet-200 rotate-3"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #2563eb)' }}>
+              🤖
             </div>
-          )}
-
-          <div className="mt-8">
-            {isLoginMode ? (
-              <button onClick={handleLogin} disabled={isLoadingAuth} className="w-full bg-gradient-to-r from-teal-400 to-emerald-500 text-white py-4 rounded-2xl font-bold hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:transform-none shadow-md">
-                התחברות לחשבון
-              </button>
-            ) : (
-              <button onClick={handleSignUp} disabled={isLoadingAuth} className="w-full bg-gradient-to-r from-slate-800 to-slate-700 text-white py-4 rounded-2xl font-bold hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:transform-none shadow-md">
-                יצירת פרופיל חדש
-              </button>
-            )}
+            <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">
+              {isLoginMode ? 'ברוכים השבים' : 'הצטרפות'}
+            </h1>
+            <p className="text-sm text-slate-400 mt-1">AI Workspace · Gemini</p>
           </div>
 
-          <div className="text-center mt-6">
+          {/* כרטיס */}
+          <div className="bg-white rounded-3xl shadow-xl shadow-violet-100/50 border border-slate-100 p-8">
+            <div className="space-y-3">
+              {!isLoginMode && (
+                <>
+                  <input type="text" placeholder="שם מלא"
+                    className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                    value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                  <input type="tel" placeholder="טלפון"
+                    className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                    value={phone} onChange={(e) => setPhone(e.target.value)} />
+                </>
+              )}
+              <input type="email" placeholder="אימייל"
+                className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input type="password" placeholder="סיסמה (6+ תווים)"
+                className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { isLoginMode ? handleLogin() : handleSignUp(); } }} />
+            </div>
+
+            {isLoginMode && (
+              <div className="text-left mt-2">
+                <a href="/forgot-password" className="text-xs text-violet-500 hover:text-violet-700 transition-colors">שכחת סיסמה?</a>
+              </div>
+            )}
+
             <button
-              onClick={() => setIsLoginMode(!isLoginMode)}
-              className="text-sm text-slate-500 hover:text-slate-800 font-medium transition-colors"
+              onClick={isLoginMode ? handleLogin : handleSignUp}
+              disabled={isLoadingAuth}
+              className="w-full mt-6 py-4 rounded-2xl font-bold text-white text-sm transition-all duration-300 disabled:opacity-40 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-violet-300/50"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #2563eb)' }}
             >
-              {isLoginMode ? 'אין לך חשבון? לחץ כאן להרשמה' : 'יש לך כבר חשבון? התחבר כאן'}
+              {isLoadingAuth ? '...' : isLoginMode ? 'כניסה לחשבון' : 'יצירת חשבון'}
+            </button>
+
+            <div className="text-center mt-4">
+              <button onClick={() => setIsLoginMode(!isLoginMode)}
+                className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
+                {isLoginMode ? 'אין חשבון? הירשמי כאן' : 'יש חשבון? התחברי'}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-slate-100" />
+              <span className="text-slate-300 text-xs">או</span>
+              <div className="flex-1 h-px bg-slate-100" />
+            </div>
+
+            <button onClick={enterAsGuest}
+              className="w-full py-3.5 rounded-2xl font-semibold text-slate-500 border border-slate-200 bg-slate-50 hover:bg-slate-100 hover:text-slate-800 transition-all duration-200 text-sm">
+              המשך כאורח — שאלה אחת
             </button>
           </div>
-
-          <div className="relative flex py-5 items-center mt-2 opacity-60">
-            <div className="flex-grow border-t border-slate-300"></div>
-            <span className="flex-shrink-0 mx-4 text-slate-400 text-sm font-medium">או</span>
-            <div className="flex-grow border-t border-slate-300"></div>
-          </div>
-          
-          <button onClick={enterAsGuest} className="w-full bg-white border border-slate-200 text-slate-600 py-3.5 rounded-2xl font-bold hover:bg-slate-50 hover:text-slate-800 hover:shadow-sm transition-all duration-300">
-            המשך כאורח (ללא היסטוריה)
-          </button>
         </div>
       </div>
     );
@@ -729,7 +716,8 @@ export default function Home() {
 
   // --- המסך הראשי ---
   return (
-    <div dir="rtl" className="flex h-[100dvh] overflow-hidden bg-[#F8FAFC] text-slate-800 relative font-sans">
+    <div dir="rtl" className="flex h-[100dvh] overflow-hidden text-slate-800 relative font-sans"
+      style={{ background: 'linear-gradient(160deg, #f0f4ff 0%, #faf5ff 50%, #eff6ff 100%)' }}>
 
       {/* תפריט צד (Sidebar) */}
       <div data-tour-id="tour-sidebar">
@@ -742,19 +730,23 @@ export default function Home() {
           onLogout={handleLogout}
           onDeleteChat={handleDeleteChat}
           onUpdateTitle={handleUpdateChatTitle}
+          onOpenSummary={() => setIsSummaryOpen(true)}
           mainMessages={mainMessages}
           userApiKey={userApiKey}
         />
       </div>
 
       {/* אזור התוכן המרכזי */}
-      <main className="flex-1 flex flex-col relative h-full overflow-hidden bg-white">
-        
-        {/* האדר עליון עשיר עם חצי שקיפות */}
-        <header className="bg-white/80 backdrop-blur-xl text-slate-800 p-4 z-20 flex justify-between items-center border-b border-slate-200/60 shrink-0 shadow-[0_2px_10px_rgba(0,0,0,0.02)] relative">
+      <main className="flex-1 flex flex-col relative h-full overflow-hidden bg-white/70 backdrop-blur-sm">
+
+        {/* האדר */}
+        <header className="bg-white/80 backdrop-blur-xl text-slate-800 p-4 z-20 flex justify-between items-center border-b border-violet-100/60 shrink-0 shadow-[0_2px_20px_rgba(124,58,237,0.06)] relative">
           <div>
-            <h1 className="text-xl font-extrabold bg-gradient-to-r from-slate-800 to-slate-500 bg-clip-text text-transparent">AI Workspace</h1>
-            {user && <span className="text-[11px] font-medium text-slate-500 tracking-wide">{user.email}</span>}
+            <h1 className="text-xl font-extrabold tracking-tight"
+              style={{ background: 'linear-gradient(90deg, #7c3aed, #2563eb)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              AI Workspace
+            </h1>
+            {user && <span className="text-[11px] font-medium text-slate-400 tracking-wide">{user.email}</span>}
           </div>
           
           <div className="flex gap-2 flex-wrap justify-end max-w-3xl">
@@ -791,25 +783,20 @@ export default function Home() {
             <button data-tour-id="tour-btn-consult" onClick={() => setIsSideModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
               <span>💡</span> התייעצות
             </button>
-            {user && currentChatId && (
-              <button data-tour-id="tour-btn-summary" onClick={() => setIsSummaryOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
-                <span>📄</span> תקציר
-              </button>
-            )}
           </div>
         </header>
 
         {toastMessage && (
           <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-50 animate-fade-in">
-            <div className="bg-slate-800/90 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-2xl text-sm font-medium border border-slate-700/50 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
+            <div className="bg-gradient-to-r from-violet-700 to-blue-700 text-white px-6 py-3 rounded-full shadow-2xl text-sm font-medium border border-violet-500/30 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-300 animate-pulse"></span>
               {toastMessage}
             </div>
           </div>
         )}
 
         {/* אזור ההודעות הנגלל - מעבר צבע עדין ברקע */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 chat-surface bg-gradient-to-b from-[#F8FAFC] to-white relative scroll-smooth">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-gradient-to-b from-violet-50/30 via-white/60 to-blue-50/20 relative scroll-smooth">
           <div className="max-w-3xl mx-auto w-full">
             {mainMessages.length === 0 ? (
               <div className="text-center mt-32 text-slate-400 animate-fade-in">
@@ -830,10 +817,20 @@ export default function Home() {
 
             {isWaiting && (
               <div className="flex w-full mb-6 justify-start animate-fade-in">
-                <div className="bg-white border border-slate-100 text-slate-600 rounded-2xl rounded-tr-sm p-4 px-6 text-sm shadow-md flex items-center gap-4 max-w-[80%] relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal-400 via-indigo-400 to-teal-400 animate-gradient-x"></div>
-                  <div className="animate-spin w-5 h-5 border-2 border-slate-200 border-t-teal-500 rounded-full"></div>
-                  <span className="font-medium">ממתין לתשובה... {countdown > 0 ? <span className="text-slate-400">({countdown} שניות)</span> : <span className="text-slate-400">(מעבד...)</span>}</span>
+                <div className="relative rounded-2xl rounded-tr-sm p-[2px] overflow-hidden max-w-[80%] shadow-lg shadow-violet-200/50">
+                  {/* פס גרדיאנט מונפש סביב הבועה */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-violet-500 via-blue-500 via-teal-400 to-violet-500 animate-thinking-flow rounded-2xl rounded-tr-sm" />
+                  <div className="relative bg-white rounded-[calc(1rem-2px)] rounded-tr-[calc(0.125rem-2px)] px-6 py-4 flex items-center gap-4 text-sm">
+                    {/* נקודות קפיצה */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-violet-500 dot-1 inline-block" />
+                      <span className="w-2 h-2 rounded-full bg-blue-500  dot-2 inline-block" />
+                      <span className="w-2 h-2 rounded-full bg-teal-500  dot-3 inline-block" />
+                    </div>
+                    <span className="font-medium text-slate-600">
+                      חושב... {countdown > 0 ? <span className="text-slate-400 text-xs">({countdown}ש׳)</span> : null}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -912,7 +909,7 @@ export default function Home() {
             <label className="flex items-center gap-2 cursor-pointer group">
               <span className="font-medium group-hover:text-slate-700 transition-colors">מודל פעיל:</span>
               <select
-                className="max-w-40 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
+                className="w-60 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
                 data-tour-id="tour-model-select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}

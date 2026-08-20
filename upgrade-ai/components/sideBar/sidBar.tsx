@@ -26,6 +26,7 @@ interface SidebarProps {
   onLogout: () => void;
   onDeleteChat: (chatId: string) => void;
   onUpdateTitle: (chatId: string, title: string) => void;
+  onOpenSummary: () => void;
   mainMessages: ChatMessageType[];
   userApiKey: string;
 }
@@ -39,6 +40,7 @@ export default function Sidebar({
   onLogout,
   onDeleteChat,
   onUpdateTitle,
+  onOpenSummary,
 }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -74,7 +76,7 @@ export default function Sidebar({
 
       {/* רשימת השיחות */}
       {isOpen && (
-        <div className="flex-1 overflow-y-auto px-3 pt-3 space-y-1 pb-4 scroll-smooth">
+        <div className="max-h-[45vh] shrink-0 overflow-y-auto px-3 pt-3 space-y-1 pb-4 scroll-smooth">
           {chatHistory.map((chat) => (
             <div 
               key={chat.id} 
@@ -86,7 +88,7 @@ export default function Sidebar({
             >
               <button 
                 onClick={() => onSelectChat(chat.id)} 
-                className={`flex-1 text-right text-[13px] font-semibold truncate transition-colors px-1 ${
+                className={`flex-1 text-right text-[11px] font-semibold truncate transition-colors px-1 ${
                   currentChatId === chat.id ? 'text-teal-800' : 'text-slate-600 hover:text-slate-800'
                 }`}
                 title={chat.title}
@@ -119,20 +121,28 @@ export default function Sidebar({
         </div>
       )}
 
+      {isOpen && user && currentChatId && (
+        <div className="px-4 pb-4 shrink-0">
+          <button data-tour-id="tour-btn-summary" onClick={onOpenSummary} className="w-full bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 font-medium transition-all duration-300 flex items-center justify-center gap-1.5 text-xs shadow-sm hover:shadow">
+            <span>📄</span> תקציר
+          </button>
+        </div>
+      )}
+
       {/* אזור המשתמש למטה */}
       {isOpen && user && (
-        <div className="border-t border-slate-100 p-4 bg-slate-50/50 mt-auto shrink-0 relative z-10">
-          <div className="flex items-center gap-3 mb-4 px-1">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-white font-extrabold text-sm shrink-0 shadow-sm shadow-teal-500/20">
+        <div className="border-t border-slate-100 p-2.5 bg-slate-50/50 mt-auto shrink-0 relative z-10">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-white font-extrabold text-xs shrink-0 shadow-sm shadow-teal-500/20">
               {user.email?.[0].toUpperCase() || 'U'}
             </div>
-            <p className="text-xs font-bold text-slate-700 truncate" dir="ltr" style={{ textAlign: 'right' }}>
+            <p className="text-[11px] font-bold text-slate-700 truncate" dir="ltr" style={{ textAlign: 'right' }}>
               {user.email}
             </p>
           </div>
           <button 
             onClick={onLogout} 
-            className="w-full rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-500 hover:border-slate-300 hover:text-slate-800 hover:shadow-sm py-3 transition-all duration-200"
+            className="w-full rounded-lg bg-white border border-slate-200 text-[10px] font-bold text-slate-500 hover:border-slate-300 hover:text-slate-800 hover:shadow-sm py-1.5 transition-all duration-200"
           >
             התנתקות מהחשבון
           </button>
