@@ -26,6 +26,22 @@ interface ChatSummaryPanelProps {
 
 type TabKey = 'steps' | 'terms';
 
+const normalizeSummary = (value: unknown): ChatSummary => {
+  const raw = value && typeof value === 'object' ? value as Partial<ChatSummary> : {};
+  return {
+    turns: Array.isArray(raw.turns)
+      ? raw.turns.filter((turn): turn is ChatSummary['turns'][number] => Boolean(turn && typeof turn.topic === 'string'))
+      : [],
+    oneLineSummary: typeof raw.oneLineSummary === 'string' ? raw.oneLineSummary : '',
+    overallSummary: Array.isArray(raw.overallSummary)
+      ? raw.overallSummary.filter((line): line is string => typeof line === 'string').slice(0, 3)
+      : [],
+    newTerms: Array.isArray(raw.newTerms)
+      ? raw.newTerms.filter((term): term is ChatSummary['newTerms'][number] => Boolean(term && typeof term.term === 'string' && typeof term.explanation === 'string'))
+      : [],
+  };
+};
+
 export default function ChatSummaryPanel({
   isOpen, onClose, chatId, chatTitle, messages, userApiKey,
 }: ChatSummaryPanelProps) {
@@ -60,8 +76,9 @@ export default function ChatSummaryPanel({
     setError(null);
     try {
       const result = await getChatSummary(messages, userApiKey);
-      setSummary(result);
-      await saveToDb(result);
+      const normalizedResult = normalizeSummary(result);
+      setSummary(normalizedResult);
+      await saveToDb(normalizedResult);
       loadedForChat.current = chatId;
     } catch (err) {
       setError(err instanceof SummaryApiError ? err.message : 'שגיאה ביצירת הסיכום.');
@@ -92,7 +109,7 @@ export default function ChatSummaryPanel({
 
         if (data?.summary) {
           // יש ב-DB — מציגים ישר
-          setSummary(data.summary as ChatSummary);
+          setSummary(normalizeSummary(data.summary));
           loadedForChat.current = chatId;
           setIsLoading(false);
         } else {
