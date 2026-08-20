@@ -29,9 +29,9 @@ export default function RootLayout({
       dir="rtl"
     >
       <body className="min-h-full flex flex-col">{children}
-        <footer className="w-full text-center p-4 text-sm text-gray-500 bg-gray-50 border-t mt-auto">
+        <footer className="w-full text-center p-3 text-xs text-gray-500 bg-white/80 border-t border-[#d8d1c8] mt-auto">
   <p>© {new Date().getFullYear()} פרויקט גמר. כל הזכויות שמורות.</p>
-  <Link href="/privacy" className="hover:text-blue-600 hover:underline mt-1 inline-block">
+  <Link href="/privacy" className="hover:text-[#075E54] hover:underline mt-1 inline-block">
     מדיניות פרטיות ותנאי שימוש
   </Link>
 </footer>

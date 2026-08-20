@@ -16,7 +16,7 @@ export default function AboutPage() {
           </h1>
           <Link
             href="/"
-            className="text-sm text-pink-600 hover:underline shrink-0"
+            className="text-sm text-[#128C7E] hover:underline shrink-0"
           >
             חזרה לצ'אט
           </Link>
