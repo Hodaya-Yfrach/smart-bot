@@ -3,14 +3,7 @@
 // components/ChatMessage.tsx
 // קומפוננטת הצגת הודעה בודדת בשיחה (בועת צ'אט).
 //
-// תומכת בשלושה סוגי תוכן:
-//   1. טקסט רגיל     — message.parts[].text
-//   2. תמונת קלט     — message.parts[].imageUrl (תמונה שהמשתמש העלה לשאלה)
-//   3. תמונה שנוצרה  — message.parts[].generatedImage (base64 ממודל image-gen)
-//
-// DEV NOTE — imageUrl לעומת generatedImage:
-//   - imageUrl: blob: URL או data-URL של תמונה שהמשתמש העלה; מוצג בצד המשתמש.
-//   - generatedImage: base64 PNG שהמודל יצר; מוצג בצד המודל.
+// מציגה טקסט רגיל של משתמש או מודל.
 //   שניהם מוצגים כ-<img> רגיל — אין טעינה חיצונית.
 //
 // DEV NOTE — כפתור עריכה:
@@ -19,8 +12,8 @@
 //   כל ההודעות מאותה נקודה ואילך.
 // =============================================================================
 
-import Image from 'next/image';
 import { ChatMessage as ChatMessageType } from '@/types/chat';
+import { useEffect, useState } from 'react';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -29,6 +22,22 @@ interface ChatMessageProps {
 
 export default function ChatMessage({ message, onEdit }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const [visibleScore, setVisibleScore] = useState(0);
+
+  useEffect(() => {
+    if (typeof message.studyScore !== 'number') return;
+    setVisibleScore(0);
+    const duration = 700;
+    const startedAt = performance.now();
+    let frameId = 0;
+    const animate = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      setVisibleScore(Math.round(message.studyScore! * progress));
+      if (progress < 1) frameId = requestAnimationFrame(animate);
+    };
+    frameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frameId);
+  }, [message.studyScore]);
 
   // מאחדים את כל הטקסטים מה-parts להצגה
   const textContent = message.parts
@@ -36,11 +45,11 @@ export default function ChatMessage({ message, onEdit }: ChatMessageProps) {
     .map((p) => p.text)
     .join('');
 
-  // תמונת קלט (העלאה של המשתמש) — blob URL או data-URL
-  const uploadedImageUrl = message.parts.find((p) => p.imageUrl)?.imageUrl;
-
-  // תמונה שנוצרה על ידי המודל — base64 PNG
-  const generatedImageBase64 = message.parts.find((p) => p.generatedImage)?.generatedImage;
+  const uploadedImageUrl = message.parts.find((part) => part.imageUrl)?.imageUrl;
+  const copyResponse = async (selectedOnly = false) => {
+    const selection = window.getSelection()?.toString().trim();
+    await navigator.clipboard.writeText(selectedOnly && selection ? selection : textContent);
+  };
 
   return (
     <div className={`flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'} group`}>
@@ -51,15 +60,10 @@ export default function ChatMessage({ message, onEdit }: ChatMessageProps) {
             : 'bg-white border border-slate-100 text-slate-700 rounded-tr-sm shadow-slate-200/50'
         }`}
       >
-        {/* תמונה שהמשתמש העלה — מוצגת מעל הטקסט */}
         {uploadedImageUrl && (
           <div className="mb-3 overflow-hidden rounded-xl">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={uploadedImageUrl}
-              alt="תמונה שהועלתה"
-              className="max-w-full max-h-64 object-contain rounded-xl"
-            />
+            <img src={uploadedImageUrl} alt="תמונה שהועלתה" className="max-h-64 max-w-full rounded-xl object-contain" />
           </div>
         )}
 
@@ -68,23 +72,25 @@ export default function ChatMessage({ message, onEdit }: ChatMessageProps) {
           <div className="whitespace-pre-wrap break-words">{textContent}</div>
         )}
 
-        {/* תמונה שנוצרה על ידי מודל image-gen — מוצגת מתחת לטקסט */}
-        {generatedImageBase64 && (
-          <div className="mt-3 overflow-hidden rounded-xl border border-slate-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`data:image/png;base64,${generatedImageBase64}`}
-              alt="תמונה שנוצרה על ידי ה-AI"
-              className="max-w-full rounded-xl"
-            />
-            {/* כפתור הורדה — מאפשר שמירת התמונה */}
-            <a
-              href={`data:image/png;base64,${generatedImageBase64}`}
-              download="generated-image.png"
-              className="mt-2 text-[11px] font-medium text-slate-400 hover:text-teal-600 flex items-center gap-1 transition-colors"
+        {!isUser && textContent && (
+          <div>
+            {typeof message.studyScore === 'number' && (
+              <div className="mb-2 inline-flex items-center rounded-lg border border-teal-100 bg-gradient-to-r from-teal-50 to-blue-50 px-2.5 py-1 text-[11px] font-extrabold text-teal-700 shadow-sm">
+                🎯 דיוק בתשובה: {visibleScore}%
+              </div>
+            )}
+            <button
+              onClick={() => copyResponse()}
+              className="mt-3 text-[11px] font-bold text-slate-400 hover:text-teal-600 transition-colors"
             >
-              <span>⬇️</span> הורד תמונה
-            </a>
+              📋 העתק תשובה
+            </button>
+            <button
+              onClick={() => copyResponse(true)}
+              className="mr-3 mt-3 text-[11px] font-bold text-slate-400 hover:text-teal-600 transition-colors"
+            >
+              📄 העתק חלק מסומן
+            </button>
           </div>
         )}
 

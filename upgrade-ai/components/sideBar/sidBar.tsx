@@ -76,11 +76,11 @@ export default function Sidebar({
 
       {/* רשימת השיחות */}
       {isOpen && (
-        <div className="max-h-[45vh] shrink-0 overflow-y-auto px-3 pt-3 space-y-1 pb-4 scroll-smooth">
+        <div className="max-h-[45vh] shrink-0 overflow-y-auto px-2 pt-2 space-y-0.5 pb-2 scroll-smooth">
           {chatHistory.map((chat) => (
             <div 
               key={chat.id} 
-              className={`flex items-center justify-between rounded-xl p-2 transition-all duration-200 group ${
+              className={`flex items-center justify-between rounded-lg p-1 transition-all duration-200 group ${
                 currentChatId === chat.id 
                   ? 'bg-teal-50 border border-teal-100/50 shadow-sm' 
                   : 'bg-transparent border border-transparent hover:bg-slate-50'
@@ -88,7 +88,7 @@ export default function Sidebar({
             >
               <button 
                 onClick={() => onSelectChat(chat.id)} 
-                className={`flex-1 text-right text-[11px] font-semibold truncate transition-colors px-1 ${
+                className={`flex-1 text-right text-[10px] font-semibold truncate transition-colors px-1 ${
                   currentChatId === chat.id ? 'text-teal-800' : 'text-slate-600 hover:text-slate-800'
                 }`}
                 title={chat.title}
@@ -103,14 +103,14 @@ export default function Sidebar({
                     const title = window.prompt('כותרת חדשה', chat.title);
                     if (title?.trim()) onUpdateTitle(chat.id, title.trim());
                   }} 
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-400 hover:border-teal-200 hover:text-teal-600 hover:bg-teal-50 transition-all shadow-sm"
+                  className="w-6 h-6 flex items-center justify-center rounded-md bg-white border border-slate-200 text-slate-400 hover:border-teal-200 hover:text-teal-600 hover:bg-teal-50 transition-all shadow-sm"
                   title="ערוך שם שיחה"
                 >
                   <span className="text-[10px]">✏️</span>
                 </button>
                 <button 
                   onClick={() => onDeleteChat(chat.id)} 
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm"
+                  className="w-6 h-6 flex items-center justify-center rounded-md bg-white border border-slate-200 text-slate-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm"
                   title="מחק שיחה"
                 >
                   <span className="text-[10px]">🗑️</span>
