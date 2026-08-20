@@ -18,6 +18,7 @@
 // =============================================================================
 
 import { useEffect, useState, useCallback } from 'react';
+import type { CSSProperties } from 'react';
 
 export interface TourStep {
   targetId: string;
@@ -77,55 +78,75 @@ export default function OnboardingTour({ steps, onDone }: Props) {
   const pos = step.position ?? 'bottom';
 
   // חישוב מיקום הבועה
-  const bubbleStyle = (() => {
-    const w = 280;
+  const bubbleStyle: CSSProperties = (() => {
+    const w = Math.min(280, window.innerWidth - 16);
+    const bubbleHeight = Math.min(220, window.innerHeight - 16);
+    const clampTop = (top: number) => Math.min(
+      Math.max(8, top),
+      Math.max(8, window.innerHeight - bubbleHeight - 8),
+    );
+    const horizontalLeft = Math.min(
+      Math.max(8, rect.left + rect.width / 2 - w / 2),
+      Math.max(8, window.innerWidth - w - 8),
+    );
+    const sideLeft = rect.right + OFFSET + w <= window.innerWidth - 8
+      ? rect.right + OFFSET
+      : rect.left - w - OFFSET >= 8
+        ? rect.left - w - OFFSET
+        : horizontalLeft;
+
     switch (pos) {
       case 'bottom': return {
-        top:  rect.bottom + OFFSET + window.scrollY,
-        left: Math.max(8, rect.left + rect.width / 2 - w / 2 + window.scrollX),
+        top: clampTop(rect.bottom + OFFSET),
+        left: horizontalLeft,
         width: w,
+        maxHeight: `calc(100vh - 16px)`,
+        overflowY: 'auto',
       };
       case 'top': return {
-        top:  rect.top - OFFSET + window.scrollY,
-        left: Math.max(8, rect.left + rect.width / 2 - w / 2 + window.scrollX),
+        top: clampTop(rect.top - OFFSET - bubbleHeight),
+        left: horizontalLeft,
         width: w,
-        transform: 'translateY(-100%)',
+        maxHeight: `calc(100vh - 16px)`,
+        overflowY: 'auto',
       };
       case 'right': return {
-        top:  rect.top + rect.height / 2 + window.scrollY,
-        left: rect.right + OFFSET + window.scrollX,
+        top: clampTop(rect.top + rect.height / 2 - bubbleHeight / 2),
+        left: sideLeft,
         width: w,
-        transform: 'translateY(-50%)',
+        maxHeight: `calc(100vh - 16px)`,
+        overflowY: 'auto',
       };
       case 'left': return {
-        top:  rect.top + rect.height / 2 + window.scrollY,
-        left: rect.left - w - OFFSET + window.scrollX,
+        top: clampTop(rect.top + rect.height / 2 - bubbleHeight / 2),
+        left: sideLeft,
         width: w,
-        transform: 'translateY(-50%)',
+        maxHeight: `calc(100vh - 16px)`,
+        overflowY: 'auto',
       };
     }
   })();
 
   // מיקום החץ
   const arrowStyle = (() => {
-    const cx = rect.left + rect.width / 2 + window.scrollX;
-    const cy = rect.top + rect.height / 2 + window.scrollY;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
     switch (pos) {
       case 'bottom': return {
-        top:  rect.bottom + OFFSET / 2 + window.scrollY - ARROW_SIZE / 2,
+        top:  rect.bottom + OFFSET / 2 - ARROW_SIZE / 2,
         left: cx - ARROW_SIZE / 2,
       };
       case 'top': return {
-        top:  rect.top - OFFSET / 2 + window.scrollY - ARROW_SIZE / 2,
+        top:  rect.top - OFFSET / 2 - ARROW_SIZE / 2,
         left: cx - ARROW_SIZE / 2,
       };
       case 'right': return {
         top:  cy - ARROW_SIZE / 2,
-        left: rect.right + OFFSET / 2 + window.scrollX - ARROW_SIZE / 2,
+        left: rect.right + OFFSET / 2 - ARROW_SIZE / 2,
       };
       case 'left': return {
         top:  cy - ARROW_SIZE / 2,
-        left: rect.left - OFFSET / 2 + window.scrollX - ARROW_SIZE / 2,
+        left: rect.left - OFFSET / 2 - ARROW_SIZE / 2,
       };
     }
   })();
@@ -143,8 +164,8 @@ export default function OnboardingTour({ steps, onDone }: Props) {
       <div
         className="fixed z-[9999] rounded-xl ring-2 ring-teal-500 ring-offset-2 pointer-events-none animate-pulse"
         style={{
-          top:    rect.top    + window.scrollY - 4,
-          left:   rect.left   + window.scrollX - 4,
+          top:    rect.top - 4,
+          left:   rect.left - 4,
           width:  rect.width  + 8,
           height: rect.height + 8,
         }}
