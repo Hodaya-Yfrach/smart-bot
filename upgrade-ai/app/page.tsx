@@ -492,12 +492,17 @@ export default function Home() {
   };
 
   const enterAsGuest = async () => {
-    const response = await fetch('/api/guest', { method: 'POST' });
-    if (response.ok) {
-      setIsGuest(true);
-      return;
+    try {
+      const response = await fetch('/api/guest', { method: 'POST', credentials: 'include' });
+      const data = await response.json().catch(() => null);
+      if (response.ok) {
+        setIsGuest(true);
+        return;
+      }
+      alert(data?.error || 'לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
+    } catch {
+      alert('לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
     }
-    alert('לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
   };
 
   // --- Chat ---
@@ -725,6 +730,7 @@ export default function Home() {
           onLogout={handleLogout}
           onDeleteChat={handleDeleteChat}
           onUpdateTitle={handleUpdateChatTitle}
+          onOpenSummary={() => setIsSummaryOpen(true)}
           mainMessages={mainMessages}
           userApiKey={userApiKey}
         />
@@ -777,11 +783,6 @@ export default function Home() {
             <button data-tour-id="tour-btn-consult" onClick={() => setIsSideModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
               <span>💡</span> התייעצות
             </button>
-            {user && currentChatId && (
-              <button data-tour-id="tour-btn-summary" onClick={() => setIsSummaryOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
-                <span>📄</span> תקציר
-              </button>
-            )}
           </div>
         </header>
 
@@ -908,7 +909,7 @@ export default function Home() {
             <label className="flex items-center gap-2 cursor-pointer group">
               <span className="font-medium group-hover:text-slate-700 transition-colors">מודל פעיל:</span>
               <select
-                className="max-w-40 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
+                className="w-60 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
                 data-tour-id="tour-model-select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
