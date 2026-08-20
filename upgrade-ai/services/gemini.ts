@@ -1,4 +1,6 @@
 // נגדיר ממשק (Interface) מסודר לתשובה שחוזרת מהפונקציה
+import { supabase } from './supabase';
+
 export interface GeminiResponse {
   text: string;
   modelUsed: string;
@@ -15,6 +17,14 @@ export class ChatApiError extends Error {
     this.failedModels = failedModels;
   }
 }
+export async function getAvailableModels(): Promise<ModelInfo[]> {
+  const response = await fetch('/api/models');
+  if (!response.ok) {
+    throw new Error('לא ניתן לטעון את רשימת המודלים כרגע.');
+  }
+  const data = await response.json();
+  return data.models;
+}
 
 export async function askGemini(
   userText: string, 
@@ -22,23 +32,28 @@ export async function askGemini(
   systemInstruction: string,
   selectedModel: string,        // המודל שהמשתמש בחר
   fallbackModels: string[] = [], // מודלים לגיבוי (אופציונלי)
-  userApiKey: string = ''        // מפתח ה-API של המשתמש (אופציונלי)
+  userApiKey: string = '',
+  isGuest = false
 ): Promise<GeminiResponse> {
   
   // הדפדפן מוסיף את ההודעה החדשה להיסטוריה
   const messages = [...history, { role: 'user', parts: [{ text: userText }] }];
 
   try {
-    // פנייה לשרת ה-Vercel שלנו שמטפל באבטחה ובפניות לגוגל
+    const { data: { session } } = await supabase.auth.getSession();
     const response = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
       body: JSON.stringify({ 
         messages, 
         systemInstruction,
         selectedModel,       // נשלח את המודל הנבחר
         fallbackModels,      // נשלח את רשימת הגיבוי
-        userApiKey           // נשלח את המפתח האישי אם הוזן
+        userApiKey,
+        isGuest,
       })
     });
 

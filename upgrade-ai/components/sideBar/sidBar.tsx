@@ -1,8 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
-import ChatSummaryPanel from './ChatSummaryPanel';
+
+import { useState } from 'react';
+import { User } from '@supabase/supabase-js';
 import { ChatMessage as ChatMessageType } from '@/types/chat';
-import { getQuickPromptSummary } from '@/services/summary';
 
 interface ChatRecord {
   id: string;
@@ -11,14 +11,14 @@ interface ChatRecord {
 }
 
 interface SidebarProps {
-  user: any;
+  user: User | null;
   chatHistory: ChatRecord[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onStartNewChat: () => void;
   onLogout: () => void;
   onDeleteChat: (chatId: string) => void;
-  onUpdateTitle: (chatId: string, newTitle: string) => void;
+  onUpdateTitle: (chatId: string, title: string) => void;
   mainMessages: ChatMessageType[];
   userApiKey: string;
 }
@@ -32,268 +32,105 @@ export default function Sidebar({
   onLogout,
   onDeleteChat,
   onUpdateTitle,
-  mainMessages,
-  userApiKey,
 }: SidebarProps) {
-  const [editingChatId, setEditingChatId] = useState<string | null>(null);
-  const [editChatTitle, setEditChatTitle] = useState('');
-  const [chatActionLoadingId, setChatActionLoadingId] = useState<string | null>(null);
-
-  // מצב הקטנה/הרחבה של לוח ההיסטוריה
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  // מצב פתיחה/סגירה של חלון התקציר הראשי
-  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
-
-  // --- מצבים לתקציר בזמן אמת של הפרומפטים (עד 7 מילים לכל תור) ---
-  const [realtimeSummaries, setRealtimeSummaries] = useState<string[]>([]);
-  const [isSummarizingTurn, setIsSummarizingTurn] = useState(false);
-
-  // כמה הודעות משתמש כבר סוכמו (או נמצאות בתהליך סיכום).
-  // זה ref ולא state בכוונה: ref מתעדכן מיידית וסינכרונית, כך שאם ה-effect
-  // רץ שוב פעמיים ברצף לפני שהבקשה הראשונה הספיקה לחזור מהשרת, הוא "יידע"
-  // מיד שהתור הזה כבר בטיפול ולא ישלח בקשה כפולה (שגרמה לכמה שורות לאותו פרומפט).
-  const summarizedCountRef = useRef(0);
-
-  const hasMessagesToSummarize = mainMessages.length > 0;
-  const currentChatTitle =
-    chatHistory.find((c) => c.id === currentChatId)?.title || 'שיחה נוכחית';
-
-  const startEditingChat = (chat: ChatRecord) => {
-    setEditingChatId(chat.id);
-    setEditChatTitle(chat.title);
-  };
-
-  const handleSaveChatTitle = async (chatId: string) => {
-    if (!editChatTitle.trim()) {
-      setEditingChatId(null);
-      return;
-    }
-    setChatActionLoadingId(chatId);
-    await onUpdateTitle(chatId, editChatTitle);
-    setEditingChatId(null);
-    setChatActionLoadingId(null);
-  };
-
-  const handleDelete = async (chatId: string) => {
-    setChatActionLoadingId(chatId);
-    await onDeleteChat(chatId);
-    setChatActionLoadingId(null);
-  };
-
-  // --- מאפסים את התקצירים בזמן אמת כשמתחילים/עוברים שיחה ---
-  useEffect(() => {
-    setRealtimeSummaries([]);
-    summarizedCountRef.current = 0;
-  }, [currentChatId]);
-
-  // --- אפקט ליצירת תקציר אוטומטי (עד 7 מילים) עבור כל תור שהושלם ---
-  // "תור שהושלם" = יש הודעת משתמש שכבר קיבלה תשובה מה-AI (ולא רק נשלחה).
-  // שורה אחת בלבד לכל תור - ראה הערה על summarizedCountRef למעלה.
-  useEffect(() => {
-    if (mainMessages.length === 0) {
-      setRealtimeSummaries([]);
-      summarizedCountRef.current = 0;
-      return;
-    }
-
-    // מחכים לתשובת ה-AI לפני שמסכמים - ההודעה האחרונה צריכה להיות של המודל
-    const lastMessage = mainMessages[mainMessages.length - 1];
-    if (lastMessage.role !== 'model') return;
-
-    const userMessages = mainMessages.filter((m) => m.role === 'user');
-    if (userMessages.length === 0) return;
-
-    // בודק מול ה-ref (סינכרוני!) אם כבר טיפלנו/מטפלים בתור הזה
-    if (userMessages.length <= summarizedCountRef.current) return;
-
-    // "נועלים" את התור הזה מיד - לפני הקריאה האסינכרונית - כדי שאם ה-effect
-    // יופעל שוב לפני שהבקשה חוזרת, הוא ידע לוותר ולא ישלח בקשה כפולה
-    summarizedCountRef.current = userMessages.length;
-
-    const latestMsg = userMessages[userMessages.length - 1];
-    const promptText = latestMsg.parts?.[0]?.text || '';
-    if (!promptText.trim()) return;
-
-    const generateQuickSummary = async () => {
-      setIsSummarizingTurn(true);
-      try {
-        // הבקשה יוצאת רק לשרת שלנו (/api/quick-summary) - לא ישירות לגוגל.
-        // כך מפתח ה-API לעולם לא נחשף בכתובת URL בדפדפן, ותמיד רץ במודל הקל ביותר.
-        const shortText = await getQuickPromptSummary(promptText, userApiKey);
-        if (shortText) {
-          setRealtimeSummaries((prev) => [...prev, shortText]);
-        }
-      } catch (error) {
-        console.error('שגיאה ביצירת תקציר מהיר:', error);
-      } finally {
-        setIsSummarizingTurn(false);
-      }
-    };
-
-    generateQuickSummary();
-  }, [mainMessages, userApiKey]);
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <>
-      <aside
-        className={`${
-          isCollapsed ? 'w-16' : 'w-64'
-        } bg-slate-900 text-slate-300 flex flex-col shadow-xl z-20 hidden md:flex shrink-0 transition-all duration-300`}
-      >
-        <div className="p-4 border-b border-slate-800">
-          <button
-            onClick={onStartNewChat}
-            title="שיחה חדשה"
-            className="w-full flex items-center justify-center gap-2 bg-[#ec4899] hover:bg-[#db2777] text-white py-3 px-4 rounded-xl font-medium transition-colors"
-          >
-            <span>+</span> {!isCollapsed && 'שיחה חדשה'}
-          </button>
-        </div>
+    <aside className={`${isOpen ? 'w-72 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-50 max-md:shadow-[0_0_50px_rgba(0,0,0,0.15)]' : 'w-16 max-md:w-0 max-md:border-none'} shrink-0 bg-white text-slate-800 border-l border-slate-100 transition-all duration-300 flex flex-col z-30 relative`}>
+      
+      {/* האדר הסרגל */}
+      <div className="p-4 flex items-center justify-between border-b border-slate-100 min-h-[76px] bg-slate-50/50 shrink-0">
+        {isOpen && <span className="font-extrabold text-slate-800 text-[15px] tracking-wide">השיחות שלי</span>}
+        <button 
+          onClick={() => setIsOpen((value) => !value)} 
+          className={`w-10 h-10 rounded-xl text-slate-400 hover:text-teal-600 hover:bg-white hover:shadow-sm flex items-center justify-center transition-all ${!isOpen ? 'mx-auto' : ''}`} 
+          aria-label={isOpen ? 'סגירת סרגל' : 'פתיחת סרגל'}
+        >
+          {isOpen ? '‹' : '☰'}
+        </button>
+      </div>
 
-        {!isCollapsed && (
-          <div className="flex-1 overflow-y-auto p-3 flex flex-col">
-            {user ? (
-              <>
-                <h3 className="text-xs font-semibold text-slate-500 mb-3 px-2 uppercase tracking-wider">
-                  היסטוריית שיחות ({chatHistory.length}/10)
-                </h3>
-                <ul className="space-y-1 mb-4">
-                  {chatHistory.map((chat) => (
-                    <li
-                      key={chat.id}
-                      className={`group rounded-lg transition-colors ${
-                        currentChatId === chat.id ? 'bg-slate-800' : 'hover:bg-slate-800'
-                      }`}
-                    >
-                      {editingChatId === chat.id ? (
-                        <div className="flex items-center gap-2 p-2">
-                          <input
-                            type="text"
-                            value={editChatTitle}
-                            onChange={(e) => setEditChatTitle(e.target.value)}
-                            className="flex-1 bg-slate-700 text-white text-sm rounded px-2 py-1 outline-none focus:ring-1 focus:ring-[#ec4899]"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveChatTitle(chat.id);
-                              if (e.key === 'Escape') setEditingChatId(null);
-                            }}
-                          />
-                          <button
-                            onClick={() => handleSaveChatTitle(chat.id)}
-                            className="text-[#ec4899] hover:text-[#db2777] text-xs font-medium shrink-0"
-                          >
-                            שמור
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <button
-                            onClick={() => onSelectChat(chat.id)}
-                            className={`flex-1 text-right p-3 truncate text-sm ${
-                              currentChatId === chat.id ? 'text-white' : 'text-slate-400'
-                            }`}
-                          >
-                            {chat.title}
-                          </button>
-                          <div className="flex gap-2 pl-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => startEditingChat(chat)}
-                              disabled={chatActionLoadingId === chat.id}
-                              className="text-blue-400 hover:text-blue-300 text-xs"
-                              title="ערוך כותרת"
-                            >
-                              ✎
-                            </button>
-                            <button
-                              onClick={() => handleDelete(chat.id)}
-                              disabled={chatActionLoadingId === chat.id}
-                              className="text-red-400 hover:text-red-300 text-xs"
-                              title="מחק שיחה"
-                            >
-                              {chatActionLoadingId === chat.id ? '...' : '🗑'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+      {/* אזור כפתור שיחה חדשה */}
+      <div className={`p-4 shrink-0 ${!isOpen && 'hidden md:block'} border-b border-slate-50`}>
+        <button 
+          onClick={onStartNewChat} 
+          className={`w-full bg-gradient-to-r from-teal-500 via-blue-500 to-teal-500 text-white font-bold text-sm shadow-md shadow-teal-500/20 hover:shadow-lg hover:shadow-teal-500/30 hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2 ${isOpen ? 'py-3.5 px-4 rounded-2xl' : 'aspect-square rounded-2xl p-0'}`}
+          title="התחל שיחה חדשה"
+          style={{ backgroundSize: '200% auto', transition: '0.5s' }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundPosition = 'right center'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundPosition = 'left center'}
+        >
+          <span className={`${isOpen ? 'text-lg' : 'text-2xl'} leading-none`}>+</span>
+          {isOpen && <span>שיחה חדשה</span>}
+        </button>
+      </div>
 
-                {/* --- תיבת התקציר הרציף (זמן אמת, עד 7 מילים לכל תור) --- */}
-                {hasMessagesToSummarize && (
-                  <div className="mt-2 pt-4 border-t border-slate-800 flex-1">
-                    <h3 className="text-xs font-semibold text-[#ec4899] mb-3 px-2 uppercase tracking-wider">
-                      רצף השיחה (עד 7 מילים)
-                    </h3>
-                    <ul className="space-y-3 px-2 overflow-y-auto max-h-[30vh] custom-scrollbar">
-                      {realtimeSummaries.map((summaryText, idx) => (
-                        <li key={idx} className="flex gap-2 text-sm text-slate-300">
-                          <span className="text-[#ec4899] shrink-0 mt-1 text-[10px]">⬤</span>
-                          <span className="leading-snug">{summaryText}</span>
-                        </li>
-                      ))}
-                      {isSummarizingTurn && (
-                        <li className="flex gap-2 text-sm text-slate-500 animate-pulse">
-                          <span className="text-[#ec4899] shrink-0 mt-1 text-[10px]">⬤</span>
-                          <span>מכין תקציר...</span>
-                        </li>
-                      )}
-                    </ul>
-
-                    {/* --- כפתור לחלון הקופץ: מושגים חדשים + תקציר כל השיחה --- */}
-                    <button
-                      onClick={() => setIsSummaryOpen(true)}
-                      disabled={!hasMessagesToSummarize}
-                      title="תקציר שיחה מלא ומושגים חדשים"
-                      className="w-full mt-3 flex items-center justify-center gap-2 text-sm bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 py-2 px-3 rounded-lg transition-colors"
-                    >
-                      <span>📄</span> תקציר שיחה מלא
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center mt-10 text-slate-500 text-sm px-4">
-                את/ה מחובר/ת כאורח.
-                <br />
-                השיחות לא נשמרות.
+      {/* רשימת השיחות */}
+      {isOpen && (
+        <div className="flex-1 overflow-y-auto px-3 pt-3 space-y-1 pb-4 scroll-smooth">
+          {chatHistory.map((chat) => (
+            <div 
+              key={chat.id} 
+              className={`flex items-center justify-between rounded-xl p-2 transition-all duration-200 group ${
+                currentChatId === chat.id 
+                  ? 'bg-teal-50 border border-teal-100/50 shadow-sm' 
+                  : 'bg-transparent border border-transparent hover:bg-slate-50'
+              }`}
+            >
+              <button 
+                onClick={() => onSelectChat(chat.id)} 
+                className={`flex-1 text-right text-[13px] font-semibold truncate transition-colors px-1 ${
+                  currentChatId === chat.id ? 'text-teal-800' : 'text-slate-600 hover:text-slate-800'
+                }`}
+                title={chat.title}
+              >
+                {chat.title}
+              </button>
+              
+              {/* כפתורי פעולות בצד שמאל - מופיעים רק במעבר עכבר (או במסכים קטנים) */}
+              <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
+                <button 
+                  onClick={() => {
+                    const title = window.prompt('כותרת חדשה', chat.title);
+                    if (title?.trim()) onUpdateTitle(chat.id, title.trim());
+                  }} 
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-400 hover:border-teal-200 hover:text-teal-600 hover:bg-teal-50 transition-all shadow-sm"
+                  title="ערוך שם שיחה"
+                >
+                  <span className="text-[10px]">✏️</span>
+                </button>
+                <button 
+                  onClick={() => onDeleteChat(chat.id)} 
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm"
+                  title="מחק שיחה"
+                >
+                  <span className="text-[10px]">🗑️</span>
+                </button>
               </div>
-            )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* אזור המשתמש למטה */}
+      {isOpen && user && (
+        <div className="border-t border-slate-100 p-4 bg-slate-50/50 mt-auto shrink-0 relative z-10">
+          <div className="flex items-center gap-3 mb-4 px-1">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-white font-extrabold text-sm shrink-0 shadow-sm shadow-teal-500/20">
+              {user.email?.[0].toUpperCase() || 'U'}
+            </div>
+            <p className="text-xs font-bold text-slate-700 truncate" dir="ltr" style={{ textAlign: 'right' }}>
+              {user.email}
+            </p>
           </div>
-        )}
-
-        {isCollapsed && <div className="flex-1" />}
-
-        {/* --- כפתור הקטנה/הרחבה של הלוח --- */}
-        <div className="border-t border-slate-800 p-3 flex flex-col gap-2">
-          <button
-            onClick={() => setIsCollapsed((prev) => !prev)}
-            title={isCollapsed ? 'הרחב לוח' : 'הקטן לוח'}
-            className="w-full flex items-center justify-center gap-2 text-sm text-slate-400 hover:text-white hover:bg-slate-800 py-2 px-3 rounded-lg transition-colors"
+          <button 
+            onClick={onLogout} 
+            className="w-full rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-500 hover:border-slate-300 hover:text-slate-800 hover:shadow-sm py-3 transition-all duration-200"
           >
-            <span>{isCollapsed ? '»' : '«'}</span>
-            {!isCollapsed && 'הקטן לוח'}
+            התנתקות מהחשבון
           </button>
         </div>
-
-        <div className="p-4 border-t border-slate-800">
-          <button
-            onClick={onLogout}
-            className="w-full text-center text-sm text-slate-400 hover:text-white transition-colors"
-          >
-            {isCollapsed ? '⏻' : 'התנתק / החלף משתמש'}
-          </button>
-        </div>
-      </aside>
-
-      <ChatSummaryPanel
-        isOpen={isSummaryOpen}
-        onClose={() => setIsSummaryOpen(false)}
-        chatId={currentChatId}
-        chatTitle={currentChatTitle}
-        messages={mainMessages}
-        userApiKey={userApiKey}
-      />
-    </>
+      )}
+    </aside>
   );
 }
