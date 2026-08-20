@@ -7,6 +7,7 @@ import ChatSummaryPanel from '@/components/sideBar/ChatSummaryPanel';
 import Sidebar from '@/components/sideBar/sidBar';
 import { ChatMessage as ChatMessageType, GeminiResponse } from '@/types/chat';
 import { ChatSummary } from '@/types/chatSummary';
+import { ModelInfo } from '@/types/models';
 import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
 import { User } from '@supabase/supabase-js';
@@ -29,27 +30,12 @@ interface DbMessage {
   content: string;
 }
 
-const AVAILABLE_MODELS = [
-  "gemini-3.7-flash",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash-lite",
-  "gemini-3.1-flash-image",
-  "gemini-3.1-flash-tts-preview",
-  "gemini-3.1-flash-live-preview"
-];
+const DEFAULT_MODEL_ID = "gemini-3.7-flash";
 
-const MODEL_DISPLAY_NAMES: Record<string, string> = {
-  "gemini-3.7-flash": "Flash — מהיר ומאוזן",
-  "gemini-2.5-pro": "Pro — חשיבה עמוקה",
-  "gemini-2.5-flash-lite": "Flash Lite — הכי זול",
-  "gemini-3.1-flash-image": "יצירת תמונות",
-  "gemini-3.1-flash-tts-preview": "קול — טקסט לדיבור",
-  "gemini-3.1-flash-live-preview": "שיחה קולית חיה"
-};
-
-const getModelDisplayName = (name: string) => {
+const getModelDisplayName = (models: ModelInfo[], name: string): string => {
   const baseName = name.replace(' (גיבוי)', '');
-  const displayName = MODEL_DISPLAY_NAMES[baseName] || baseName;
+  const found = models.find(m => m.id === baseName);
+  const displayName = found?.displayName || baseName;
   return name.includes(' (גיבוי)') ? `${displayName} (גיבוי)` : displayName;
 };
 
@@ -116,13 +102,15 @@ export default function Home() {
   const [countdown, setCountdown] = useState(15);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0]);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_ID);
   const [disabledModels, setDisabledModels] = useState<string[]>([]);
 
   // 5. ניהול מפתח API נעילה/עריכה ב-DB
   const [userApiKey, setUserApiKey] = useState('');
   const [isApiKeyLocked, setIsApiKeyLocked] = useState(false);
-  const [currentModelName, setCurrentModelName] = useState(AVAILABLE_MODELS[0]);
+  const [currentModelName, setCurrentModelName] = useState(DEFAULT_MODEL_ID);
 
   const guestLimitReached = isGuest && mainMessages.some(msg => msg.role === 'user');
 
@@ -146,6 +134,30 @@ export default function Home() {
       if (session) setUser(session.user);
     };
     checkUser();
+  }, []);
+
+  // טעינת רשימת המודלים מה-API
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const res = await fetch('/api/models');
+        if (!res.ok) throw new Error('Failed to fetch models');
+        const data = await res.json();
+        const models: ModelInfo[] = data.models ?? [];
+        setAvailableModels(models);
+        // אם המודל שנבחר לא קיים ברשימה, נאפס לברירת מחדל
+        if (models.length > 0 && !models.find(m => m.id === selectedModel)) {
+          setSelectedModel(models[0].id);
+          setCurrentModelName(models[0].id);
+        }
+      } catch (err) {
+        console.error('שגיאה בטעינת מודלים:', err);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+    fetchModels();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // טעינת כל נתוני המשתמש מה-DB כשהוא מתחבר (כולל מפתח ומודל מועדף)
@@ -359,7 +371,7 @@ export default function Home() {
     setIsGuest(false);
     setMainMessages([]);
     setCurrentChatId(null);
-    setCurrentModelName(AVAILABLE_MODELS[0]);
+    setCurrentModelName(availableModels[0]?.id ?? DEFAULT_MODEL_ID);
   };
 
   const startNewChat = () => {
@@ -484,7 +496,9 @@ export default function Home() {
       }
 
       const combinedSystemInstructions = getCombinedSystemInstructions();
-      const fallbackModels = AVAILABLE_MODELS.filter(m => m !== selectedModel && !disabledModels.includes(m));
+      const fallbackModels = availableModels
+        .map(m => m.id)
+        .filter(m => m !== selectedModel && !disabledModels.includes(m));
 
       const response: GeminiResponse = await askGemini(
         userText,
@@ -514,7 +528,7 @@ export default function Home() {
 
       if (response.modelUsed !== selectedModel) {
         setCurrentModelName(`${response.modelUsed} (גיבוי)`);
-        setToastMessage(`עקב עומס, הועברת אוטומטית למודל ${getModelDisplayName(response.modelUsed)}`);
+        setToastMessage(`עקב עומס, הועברת אוטומטית למודל ${getModelDisplayName(availableModels, response.modelUsed)}`);
         setTimeout(() => setToastMessage(null), 4000);
       } else {
         setCurrentModelName(selectedModel);
@@ -782,12 +796,17 @@ export default function Home() {
                 className="max-w-40 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
+                disabled={modelsLoading}
               >
-                {AVAILABLE_MODELS.map(model => (
-                  <option key={model} value={model} disabled={disabledModels.includes(model)}>
-                    {MODEL_DISPLAY_NAMES[model] || model} {disabledModels.includes(model) ? '(עמוס)' : ''}
-                  </option>
-                ))}
+                {modelsLoading ? (
+                  <option>טוען מודלים...</option>
+                ) : (
+                  availableModels.map(model => (
+                    <option key={model.id} value={model.id} disabled={disabledModels.includes(model.id)}>
+                      {model.displayName} {disabledModels.includes(model.id) ? '(עמוס)' : ''}
+                    </option>
+                  ))
+                )}
               </select>
             </label>
             <div className="flex items-center gap-4">
@@ -795,7 +814,7 @@ export default function Home() {
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${isGuest && guestLimitReached ? 'bg-red-400' : 'bg-green-400'}`}></div>
                 <span className="font-medium">
-                  {isGuest ? (guestLimitReached ? "נגמרו שאלות האורח" : "אורח: 1/1 שאלות") : getModelDisplayName(currentModelName)}
+                  {isGuest ? (guestLimitReached ? "נגמרו שאלות האורח" : "אורח: 1/1 שאלות") : getModelDisplayName(availableModels, currentModelName)}
                 </span>
               </div>
             </div>
@@ -887,12 +906,17 @@ export default function Home() {
                     className="w-full border border-slate-200 rounded-xl p-3.5 bg-white focus:ring-2 focus:ring-indigo-500/30 outline-none font-medium text-slate-700 shadow-sm"
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
+                    disabled={modelsLoading}
                   >
-                    {AVAILABLE_MODELS.map(model => (
-                      <option key={model} value={model} disabled={disabledModels.includes(model)}>
-                        {MODEL_DISPLAY_NAMES[model] || model} {disabledModels.includes(model) ? '(עמוס כרגע - יתפנה בקרוב)' : ''}
-                      </option>
-                    ))}
+                    {modelsLoading ? (
+                      <option>טוען מודלים...</option>
+                    ) : (
+                      availableModels.map(model => (
+                        <option key={model.id} value={model.id} disabled={disabledModels.includes(model.id)}>
+                          {model.displayName} {disabledModels.includes(model.id) ? '(עמוס כרגע - יתפנה בקרוב)' : ''}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
 
