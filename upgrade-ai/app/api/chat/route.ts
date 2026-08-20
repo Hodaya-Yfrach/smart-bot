@@ -38,7 +38,7 @@ import { resolveModel } from '@/services/models';
 // ─── קבועי אבטחה וביצועים ────────────────────────────────────────────────────
 const MAX_MESSAGE_LENGTH = 16000;       // תווים מקסימאליים בהודעה טקסטואלית
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // חלון זמן ל-rate limit (60 שניות)
-const MAX_REQUESTS_PER_WINDOW = 20;     // בקשות מקסימאליות לחלון
+const MAX_REQUESTS_PER_WINDOW = 60;     // בקשות מקסימאליות לחלון
 const MAX_IMAGE_SIZE_BYTES = 4 * 1024 * 1024; // 4MB — גבול בטוח לתמונות
 
 // ─── Zod Schema לולידציה של גוף הבקשה ──────────────────────────────────────
@@ -131,7 +131,7 @@ export async function POST(req: Request) {
       if (userRateData.count > MAX_REQUESTS_PER_WINDOW) {
         return NextResponse.json({
           error: 'שלחתם יותר מדי בקשות ברצף. המערכת זקוקה לרגע מנוחה, אנא המתינו כדקה ונסו שוב.',
-        }, { status: 429 });
+        }, { status: 429, headers: { 'Retry-After': '60' } });
       }
     }
     rateLimitMap.set(ip, userRateData);
@@ -281,6 +281,17 @@ export async function POST(req: Request) {
       } catch (err: any) {
         const errorMessage = err?.message || 'Unknown error';
         console.error(`Gemini request failed for ${modelName}:`, errorMessage);
+
+        const isQuotaError =
+          errorMessage.includes('429') ||
+          /quota|rate.?limit|resource.?exhausted|too many requests/i.test(errorMessage);
+        if (isQuotaError) {
+          return NextResponse.json({
+            error: 'מכסת השימוש ב-Gemini הסתיימה או שהגעתם למגבלת הקצב. נסו שוב מאוחר יותר או הגדירו מפתח Gemini אישי בהגדרות.',
+            failedModels: [modelName],
+          }, { status: 429, headers: { 'Retry-After': '60' } });
+        }
+
         // בעת יצירת תמונה — מחזירים את שגיאת ה-API המקורית ישירות
         if (isImageModel) {
           return NextResponse.json({
