@@ -1,6 +1,6 @@
 // נגדיר ממשק (Interface) מסודר לתשובה שחוזרת מהפונקציה
 import { supabase } from './supabase';
-
+import type { ModelInfo } from '@/types/models';
 export interface GeminiResponse {
   text: string;
   modelUsed: string;
