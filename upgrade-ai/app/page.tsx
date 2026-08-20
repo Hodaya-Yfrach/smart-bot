@@ -41,13 +41,13 @@ const DEFAULT_MODEL_ID = "gemini-3.7-flash";
 
 // ─── שלבי מדריך ההיכרות ────────────────────────────────────────────────────
 const TOUR_STEPS: TourStep[] = [
-  { targetId: 'tour-model-select',  title: 'בחירת מודל AI',        text: 'בחרי כאן את המודל שתרצי לשוחח איתו — Flash מהיר, Pro חכם יותר, ומודל התמונות יוצר תמונות מטקסט.',       position: 'top' },
+  { targetId: 'tour-model-select',  title: 'בחירת מודל AI',        text: 'בחר כאן את המודל שתרצה לשוחח איתו — Flash מהיר, Pro חכם יותר, ומודל התמונות יוצר תמונות מטקסט.',       position: 'top' },
   { targetId: 'tour-send-btn',      title: 'שליחת הודעה',          text: 'Enter לשליחה מהירה, Shift+Enter לשורה חדשה.',               position: 'top' },
   { targetId: 'tour-btn-settings',  title: 'הגדרות',               text: 'כאן מגדירים מפתח API אישי (BYOK) ומודל ברירת מחדל. המפתח נשמר מאובטח בחשבון.',                       position: 'bottom' },
-  { targetId: 'tour-btn-rules',     title: 'כללים וזיכרון',        text: 'הגדירי כללים קבועים לכל השיחות ("תמיד תענה בקצרה") או כללים ספציפיים לשיחה הנוכחית.',               position: 'bottom' },
+  { targetId: 'tour-btn-rules',     title: 'כללים וזיכרון',        text: 'הגדר כללים קבועים לכל השיחות ("תמיד תענה בקצרה") או כללים ספציפיים לשיחה הנוכחית.',               position: 'bottom' },
   { targetId: 'tour-btn-consult',   title: 'חלון התייעצות',        text: 'פאנל צדדי שמאפשר לשאול שאלות על השיחה הראשית מבלי להפריע לה — שימושי לניתוח ולהבהרות.',            position: 'bottom' },
-  { targetId: 'tour-btn-summary',   title: 'תקציר שיחה',           text: 'לאחר שיחה — לחצי כאן לקבלת תקציר חכם עם נקודות מרכזיות ומושגים חדשים. נשמר ב-DB אוטומטית.',        position: 'bottom' },
-  { targetId: 'tour-study-mode',    title: 'מצב לימודים',           text: 'הפעילי את המתג כדי להפוך את השיחה לתרגול. “רק מתשובת AI” שואל רק על מה שה-AI כתב בתשובה הנוכחית. “לפי הנושא שלי” שואל לפי שאלתך ויכול להוסיף ידע כללי, אבל רק אם הוא קשור ישירות לנושא שביקשת. המצב זמני לשיחה הנוכחית בלבד.', position: 'top' },
+  { targetId: 'tour-btn-summary',   title: 'תקציר שיחה',           text: 'לאחר שיחה — לחץ כאן לקבלת תקציר חכם עם נקודות מרכזיות ומושגים חדשים. נשמר ב-DB אוטומטית.',        position: 'bottom' },
+  { targetId: 'tour-study-mode',    title: 'מצב לימודים',           text: 'הפעל את המתג כדי להפוך את השיחה לתרגול. “רק מתשובת AI” שואל רק על מה שה-AI כתב בתשובה הנוכחית. “לפי הנושא שלי” שואל לפי שאלתך ויכול להוסיף ידע כללי, אבל רק אם הוא קשור ישירות לנושא שביקשת. המצב זמני לשיחה הנוכחית בלבד.', position: 'top' },
   { targetId: 'tour-sidebar',       title: 'היסטוריית שיחות',      text: 'כאן מוצגות כל השיחות הקודמות שלך. ניתן ללחוץ לפתיחה, לערוך כותרת, או למחוק.',                       position: 'right' },
 ];
 
@@ -66,7 +66,7 @@ const getHebrewAuthError = (errorMsg: string) => {
   const msg = errorMsg.toLowerCase();
 
   if (msg.includes('user already registered')) {
-    return "כתובת האימייל הזו כבר רשומה במערכת. אנא לחצו על 'התחברות פרופיל קיים'.";
+    return "כתובת האימייל הזו כבר רשומה במערכת. אנא לחץ על 'התחברות פרופיל קיים'.";
   }
   if (msg.includes('invalid login credentials')) {
     return "כתובת האימייל או הסיסמה שהזנתם שגויים. אנא נסו שוב.";
@@ -718,7 +718,7 @@ export default function Home() {
             <div className="text-center mt-4">
               <button onClick={() => setIsLoginMode(!isLoginMode)}
                 className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
-                {isLoginMode ? 'אין חשבון? הירשמי כאן' : 'יש חשבון? התחברי'}
+                {isLoginMode ? 'אין חשבון? הירשם כאן' : 'יש חשבון? התחבר'}
               </button>
             </div>
 
@@ -1154,7 +1154,7 @@ export default function Home() {
                   <div className="flex gap-3">
                     <textarea
                       value={newGlobalRule} onChange={(e) => setNewGlobalRule(e.target.value)}
-                      placeholder="הגדירי כלל שתקף תמיד לכל צ'אט חדש..."
+                      placeholder="הגדר כלל שתקף תמיד לכל צ'אט חדש..."
                       className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-purple-500/30 outline-none text-sm resize-none h-14 transition-all"
                     />
                     <button onClick={addGlobalRule} className="bg-slate-800 hover:bg-slate-700 text-white px-6 rounded-2xl text-sm font-bold shadow-sm transition-colors">הוספה</button>
