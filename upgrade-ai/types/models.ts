@@ -5,7 +5,7 @@
 // ModelCapability מגדיר את היכולות האפשריות; ModelInfo את מבנה כל מודל.
 // =============================================================================
 
-export type ModelCapability = 'text' | 'vision' | 'image-gen' | 'tts' | 'live-audio';
+export type ModelCapability = 'text' | 'vision' | 'tts' | 'live-audio';
 
 export interface ModelInfo {
   id: string;

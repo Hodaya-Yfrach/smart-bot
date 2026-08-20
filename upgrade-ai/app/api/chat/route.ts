@@ -5,18 +5,9 @@
 // תפקידים עיקריים:
 //   1. אבטחה — בדיקת CORS, Rate-Limit, אימות משתמש/אורח.
 //   2. ולידציה — zod schema על גוף הבקשה.
-//   3. שליחה לגמיני — תמיכה בטקסט בלבד, בתמונת-קלט (vision), וביצירת תמונה.
+//   3. שליחה לגמיני — תמיכה בטקסט בלבד.
 //   4. Fallback אוטומטי — אם מודל נכשל, מנסים את הבא ברשימה.
 //
-// מודלי תמונה (image-gen):
-//   כאשר capabilities של המודל כוללות "image-gen", השרת משתמש ב-
-//   responseModalities: ['Text', 'Image'] וחולץ את התמונה מה-inlineData
-//   שמוחזר בתשובה. התמונה מוחזרת ללקוח כ-base64.
-//
-// תמיכה בתמונות בקלט (vision):
-//   אם ה-parts של ההודעה האחרונה כוללים inlineData (base64 + mimeType),
-//   הם נשלחים לגמיני כחלק מה-parts ישירות — הדגמים gemini-2.5-* תומכים בזה.
-//   ההיסטוריה הקודמת ממשיכה להישלח כטקסט בלבד (הגבלה של ה-SDK).
 //
 // DEV NOTE — שדות חשובים בבקשה:
 //   messages       — היסטוריית השיחה כולל ההודעה החדשה
@@ -24,7 +15,6 @@
 //   fallbackModels — מודלים לגיבוי אם הנבחר נכשל
 //   userApiKey     — מפתח אישי (BYOK); אם ריק, משתמשים ב-GEMINI_API_KEY
 //   isGuest        — האם הבקשה מגיעה ממשתמש אורח (מוגבל לשאלה אחת)
-//   isImageModel   — האם המודל הנבחר הוא מודל יצירת תמונות
 // =============================================================================
 
 import { NextResponse } from 'next/server';
@@ -39,21 +29,19 @@ import { resolveModel } from '@/services/models';
 const MAX_MESSAGE_LENGTH = 16000;       // תווים מקסימאליים בהודעה טקסטואלית
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // חלון זמן ל-rate limit (60 שניות)
 const MAX_REQUESTS_PER_WINDOW = 60;     // בקשות מקסימאליות לחלון
-const MAX_IMAGE_SIZE_BYTES = 4 * 1024 * 1024; // 4MB — גבול בטוח לתמונות
+const MAX_IMAGE_SIZE_BYTES = 4 * 1024 * 1024;
 
 // ─── Zod Schema לולידציה של גוף הבקשה ──────────────────────────────────────
-// MessagePart: טקסט בלבד, או inlineData (תמונת קלט base64)
+// MessagePart: טקסט, או תמונת קלט לניתוח
 const messagePartSchema = z.union([
   z.object({ text: z.string() }),
   z.object({
     inlineData: z.object({
       mimeType: z.string().regex(/^image\/(jpeg|png|webp|gif)$/),
-      data: z.string().max(MAX_IMAGE_SIZE_BYTES * 1.4), // base64 ~33% גדול יותר
+      data: z.string().max(MAX_IMAGE_SIZE_BYTES * 1.4),
     }),
   }),
-  // imageUrl ו-generatedImage משמשים ל-UI בלבד — השרת מתעלם מהם
   z.object({ imageUrl: z.string() }),
-  z.object({ generatedImage: z.string() }),
 ]);
 
 const chatRequestSchema = z.object({
@@ -68,8 +56,8 @@ const chatRequestSchema = z.object({
   userApiKey: z.string().optional(),
   systemInstruction: z.string().optional(),
   isGuest: z.boolean().default(false),
-  /** האם המודל הנבחר הוא מודל יצירת תמונות */
-  isImageModel: z.boolean().default(false),
+  studyMode: z.boolean().default(false),
+  studyQuestionMode: z.enum(['ai', 'user']).default('ai'),
 });
 
 // ─── Rate Limit Map (in-memory, per-process) ─────────────────────────────────
@@ -91,13 +79,11 @@ async function isAuthenticated(accessToken: string | null) {
   return Boolean(data.user);
 }
 
-// ─── פונקציית עזר: חילוץ parts תקינים לשליחה לגמיני ─────────────────────────
-// מסנן החוצה שדות UI-only (imageUrl, generatedImage) ומשאיר רק text + inlineData
 function extractGeminiParts(parts: any[]): any[] {
   return parts
-    .map((p) => {
-      if (p.inlineData) return { inlineData: p.inlineData };
-      if (p.text !== undefined) return { text: p.text };
+    .map((part) => {
+      if (part.inlineData) return { inlineData: part.inlineData };
+      if (part.text !== undefined) return { text: part.text };
       return null;
     })
     .filter(Boolean);
@@ -151,7 +137,7 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    const { messages, selectedModel, fallbackModels, userApiKey, systemInstruction, isGuest, isImageModel } =
+    const { messages, selectedModel, fallbackModels, userApiKey, systemInstruction, isGuest, studyMode, studyQuestionMode } =
       parseResult.data;
 
     // ── 4. אימות משתמש / אורח ────────────────────────────────────────────────
@@ -194,19 +180,15 @@ export async function POST(req: Request) {
 
     // ── 7. בניית היסטוריה לגמיני ─────────────────────────────────────────────
     // ההיסטוריה = כל ההודעות פרט לאחרונה.
-    // שדות UI-only (imageUrl, generatedImage) מסוננים לפני השליחה.
     const history = messages
       .slice(0, -1)
       .map((msg) => ({
         role: msg.role,
-        parts: extractGeminiParts(msg.parts).filter(
-          (p: any) => !p.inlineData // ההיסטוריה — טקסט בלבד (SDK לא תומך ב-vision בהיסטוריה)
-        ),
+        parts: extractGeminiParts(msg.parts).filter((part: any) => !part.inlineData),
       }))
       .filter((msg) => msg.parts.length > 0)
       .filter((msg, index) => index > 0 || msg.role === 'user');
 
-    // ה-parts של ההודעה האחרונה — כוללים גם תמונת קלט אם המשתמש העלה
     const latestParts = extractGeminiParts(lastMessage.parts);
 
     // ── 8. Fallback loop — ניסיון על כל מודל בתור ───────────────────────────
@@ -223,57 +205,38 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // ── מודל יצירת תמונות ───────────────────────────────────────────────
-        if (isImageModel) {
-          const model = genAI.getGenerativeModel({ model: apiModelName });
-
-          const prompt = latestMessageText || 'צור תמונה';
-
-          // responseModalities חייב להיות ב-request ישירות (לא ב-generationConfig)
-          const result = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            // @ts-ignore — responseModalities אינו בטיפוסים הרשמיים עדיין
-            generationConfig: { responseModalities: ['Text', 'Image'] },
-          });
-
-          const responseParts = result.response.candidates?.[0]?.content?.parts ?? [];
-
-          let generatedImageBase64: string | undefined;
-          let responseText = '';
-          for (const part of responseParts) {
-            if ((part as any).inlineData?.data) {
-              generatedImageBase64 = (part as any).inlineData.data;
-            } else if (part.text) {
-              responseText += part.text;
-            }
-          }
-
-          if (!generatedImageBase64) {
-            console.error(`Image model ${modelName} returned no image. Parts count: ${responseParts.length}, Parts:`, JSON.stringify(responseParts).slice(0, 500));
-            failedModels.push(modelName);
-            continue;
-          }
-
-          if (isGuest && guestToken) { /* שמירת token נוצלה — מנוהל בצד לקוח */ }
-          return NextResponse.json({
-            text: responseText || '\u200F',
-            generatedImage: generatedImageBase64,
-            modelUsed: modelName,
-            failedModels,
-          });
-        }
-
-        // ── מודל שיחה (text / vision) ────────────────────────────────────────
-        const model = genAI.getGenerativeModel({ model: apiModelName, systemInstruction });
+        const studyQuestionInstruction = studyQuestionMode === 'user'
+          ? 'צור את שאלת הסיום לפי השאלה, הנושא או המידע שהמשתמש ביקש. אפשר להשתמש גם בידע כללי נוסף, אבל הוא חייב להיות קשור ישירות לנושא שהמשתמש העלה. אל תשאל על פרט צדדי או על נושא שלא ביקש.'
+          : 'צור את שאלת הסיום אך ורק לפי התוכן, ההסברים והדוגמאות שהופיעו בתשובת ה-AI הנוכחית. אל תוסיף ידע כללי חדש ואל תשאל על מידע שלא הופיע בתשובה.';
+        const studyInstruction = studyMode
+          ? `${systemInstruction || ''}\nמצב לימודים פעיל. הערך את התשובה האחרונה של המשתמש מול השאלה וההקשר. בתגובה כתוב בשורה הראשונה בדיוק [[STUDY_SCORE:מספר שלם בין 0 ל-100]]. לאחר מכן הסבר קצר וברור, ואם יש טעות הסבר מה לתקן. ${studyQuestionInstruction} בסוף כתוב שורת שאלה נפרדת שמתחילה בדיוק ב-[[STUDY_QUESTION: ומסתיימת ב-]]. השאלה חייבת להיות מאתגרת אך פשוטה להבנה. אל תכתוב את סימוני הציון או השאלה במקום אחר.`
+          : systemInstruction;
+        const model = genAI.getGenerativeModel({ model: apiModelName, systemInstruction: studyInstruction });
         const chat = model.startChat({ history });
 
-        // שולחים את ה-parts של ההודעה האחרונה (כולל תמונה אם יש)
         const result = await chat.sendMessage(latestParts.length > 0 ? latestParts : latestMessageText);
         const cleanedText = result.response.text().replace(/^\s*[\r\n]+/, '').trim();
 
         if (isGuest && guestToken) { /* שמירת token נוצלה — מנוהל בצד לקוח */ }
+        const studyScoreMatch = cleanedText.match(/^\s*\[\[STUDY_SCORE:(\d{1,3})\]\]\s*/);
+        const studyScore = studyScoreMatch ? Math.min(100, Number(studyScoreMatch[1])) : undefined;
+        let responseText = studyScoreMatch ? cleanedText.slice(studyScoreMatch[0].length).trim() : cleanedText;
+        if (studyMode) {
+          const studyQuestionMatch = responseText.match(/\[\[STUDY_QUESTION:\s*([\s\S]*?)\]\]\s*$/);
+          const studyQuestion = studyQuestionMatch?.[1].trim();
+          responseText = studyQuestionMatch ? responseText.slice(0, studyQuestionMatch.index).trim() : responseText;
+          if (studyQuestion) {
+            responseText = `${responseText}\n\n${studyQuestion}`;
+          } else if (!/[?؟]\s*$/.test(responseText)) {
+            const fallbackQuestion = studyQuestionMode === 'user'
+              ? 'איך אפשר להסביר במילים שלך את הקשר בין הנושא שביקשת לבין התשובה שקיבלת?'
+              : 'מהו הרעיון המרכזי שהוסבר בתשובה, ואיך אפשר ליישם אותו?';
+            responseText = `${responseText}\n\n${fallbackQuestion}`;
+          }
+        }
         return NextResponse.json({
-          text: '\u200F' + cleanedText,
+          text: '\u200F' + responseText,
+          studyScore,
           modelUsed: modelName,
           failedModels,
         });
@@ -292,13 +255,6 @@ export async function POST(req: Request) {
           }, { status: 429, headers: { 'Retry-After': '60' } });
         }
 
-        // בעת יצירת תמונה — מחזירים את שגיאת ה-API המקורית ישירות
-        if (isImageModel) {
-          return NextResponse.json({
-            error: `שגיאה מ-Gemini Image API: ${errorMessage}`,
-            failedModels: [modelName],
-          }, { status: 503 });
-        }
         failedModels.push(modelName);
 
         // NetFree חוסם את Gemini — אין טעם לנסות מודלים נוספים

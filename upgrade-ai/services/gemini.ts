@@ -9,17 +9,8 @@
 //   - GeminiResponse  — טיפוס התשובה המלאה מ-/api/chat
 //   - ChatApiError    — מחלקת שגיאה מועשרת שמכילה גם את רשימת המודלים שנכשלו
 //   - getAvailableModels() — מביא את רשימת המודלים הזמינים מ-/api/models
-//   - askGemini()     — שולח הודעה (עם תמיכה בתמונות) ומחזיר תשובה
+//   - askGemini()     — שולח הודעה ומחזיר תשובה
 //
-// DEV NOTE — תמיכה בתמונות:
-//   הפונקציה askGemini מקבלת את messages כמו תמיד.
-//   אם ה-part האחרון כולל inlineData (תמונה ב-base64), הוא נשלח לשרת
-//   כחלק מה-parts ומועבר ל-Gemini Vision.
-//   imageUrl ו-generatedImage בתוך parts הם שדות UI-only — השרת מתעלם מהם.
-//
-// DEV NOTE — מודל יצירת תמונות:
-//   העבר isImageModel: true כאשר selectedModel הוא מודל image-gen.
-//   השרת ישתמש ב-responseModalities: ['Text', 'Image'] ויחזיר generatedImage.
 // =============================================================================
 
 import { supabase } from './supabase';
@@ -62,9 +53,6 @@ export async function getAvailableModels(): Promise<ModelInfo[]> {
  * @param fallbackModels  - מודלים לגיבוי אם הנבחר נכשל
  * @param userApiKey      - מפתח אישי (BYOK); ריק = שימוש במפתח האתר
  * @param isGuest         - האם מצב אורח (מוגבל לשאלה אחת)
- * @param imageBase64     - תמונת קלט ב-base64 (אופציונלי, ל-vision)
- * @param imageMimeType   - סוג MIME של התמונה (ברירת מחדל: image/jpeg)
- * @param isImageModel    - האם המודל הנבחר הוא מודל יצירת תמונות
  */
 export async function askGemini(
   userText: string,
@@ -75,26 +63,18 @@ export async function askGemini(
   userApiKey: string = '',
   isGuest = false,
   imageBase64?: string,
-  imageMimeType: string = 'image/jpeg',
-  isImageModel = false,
+  imageMimeType = 'image/jpeg',
+  studyMode = false,
+  studyQuestionMode: 'ai' | 'user' = 'ai',
 ): Promise<GeminiResponse> {
 
-  // בניית ה-parts של ההודעה החדשה:
-  // אם יש תמונה — מוסיפים inlineData לפני הטקסט (כפי שגמיני מצפה)
-  const newParts: any[] = [];
-  if (imageBase64) {
-    newParts.push({
-      inlineData: { mimeType: imageMimeType, data: imageBase64 },
-    });
-  }
-  if (userText.trim()) {
-    newParts.push({ text: userText });
-  }
-
   // בונים את ההיסטוריה המלאה כולל ההודעה החדשה
+  const latestParts = imageBase64
+    ? [{ inlineData: { mimeType: imageMimeType, data: imageBase64 } }, { text: userText }]
+    : [{ text: userText }];
   const messages = [
     ...history,
-    { role: 'user' as const, parts: newParts.length > 0 ? newParts : [{ text: userText }] },
+    { role: 'user' as const, parts: latestParts },
   ];
 
   try {
@@ -114,7 +94,8 @@ export async function askGemini(
         fallbackModels,
         userApiKey,
         isGuest,
-        isImageModel,
+        studyMode,
+        studyQuestionMode,
       }),
     });
 
@@ -132,7 +113,7 @@ export async function askGemini(
       text: data.text,
       modelUsed: data.modelUsed,
       failedModels: data.failedModels || [],
-      generatedImage: data.generatedImage, // undefined אם לא מודל תמונות
+      studyScore: typeof data.studyScore === 'number' ? data.studyScore : undefined,
     };
 
   } catch (error: any) {

@@ -35,7 +35,14 @@ export default function ChatSummaryPanel({
   const [activeTab, setActiveTab] = useState<TabKey>('steps');
   const [showOverall, setShowOverall] = useState(false);
   const [showExpandedOverall, setShowExpandedOverall] = useState(false);
+  const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const loadedForChat = useRef<string | null>(null);
+
+  const copySection = async (name: string, text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopiedSection(name);
+    setTimeout(() => setCopiedSection(null), 1800);
+  };
 
   // ── שמירה/עדכון ב-DB ──────────────────────────────────────────────────────
   const saveToDb = async (s: ChatSummary) => {
@@ -183,6 +190,12 @@ export default function ChatSummaryPanel({
                 </button>
                 {showOverall && (
                   <div className="p-5 pt-2 bg-white text-[15px] text-slate-700 space-y-3 leading-relaxed">
+                    <button
+                      onClick={() => copySection('overall', [summary.oneLineSummary, ...summary.overallSummary].filter(Boolean).join('\n'))}
+                      className="text-xs font-bold text-slate-400 hover:text-teal-600"
+                    >
+                      📋 {copiedSection === 'overall' ? 'הועתק' : 'העתק סיכום כללי'}
+                    </button>
                     {!summary.oneLineSummary && summary.overallSummary.length === 0 ? (
                       <p className="text-slate-400 italic">אין מספיק תוכן לסיכום כללי.</p>
                     ) : !showExpandedOverall ? (
@@ -210,7 +223,15 @@ export default function ChatSummaryPanel({
                 </div>
               ) : (
                 <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">נקודות מרכזיות שעלו</h3>
+                  <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-2">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">נקודות מרכזיות שעלו</h3>
+                    <button
+                      onClick={() => copySection('steps', summary.turns.map(turn => [turn.topic, turn.nextPrompt].filter(Boolean).join('\n')).join('\n'))}
+                      className="text-[11px] font-bold text-slate-400 hover:text-teal-600"
+                    >
+                      📋 {copiedSection === 'steps' ? 'הועתק' : 'העתק הכל'}
+                    </button>
+                  </div>
                   <ul className="space-y-3.5">
                     {summary.turns.flatMap((turn, idx) => {
                       const items: React.ReactNode[] = [
@@ -234,6 +255,12 @@ export default function ChatSummaryPanel({
           )}
           {!isLoading && !error && summary && activeTab === 'terms' && (
             <div className="space-y-4">
+              <button
+                onClick={() => copySection('terms', summary.newTerms.map(term => `${term.term}: ${term.explanation}`).join('\n'))}
+                className="text-xs font-bold text-slate-400 hover:text-teal-600"
+              >
+                📋 {copiedSection === 'terms' ? 'הועתק' : 'העתק את כל המושגים'}
+              </button>
               {summary.newTerms.length === 0 ? (
                 <div className="bg-white border border-slate-100 rounded-2xl p-8 text-center shadow-sm">
                   <p className="text-sm text-slate-400 font-medium">לא זוהו מושגים חדשים בשיחה זו.</p>

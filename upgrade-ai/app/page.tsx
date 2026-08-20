@@ -4,14 +4,8 @@
 // אחראי על:
 //   - מסך התחברות / הרשמה / אורח
 //   - ממשק הצ'אט: שליחת הודעות, היסטוריה, עריכת הודעה אחרונה
-//   - העלאת תמונה לקלט (vision) ויצירת תמונה (image-gen)
 //   - ניהול כללים (גלובליים + לשיחה), הגדרות BYOK, תקציר שיחה
 //
-// DEV NOTE — תמיכה בתמונות:
-//   pendingImage מחזיק את התמונה שהמשתמש בחר (base64 + mimeType + previewUrl).
-//   בשליחה: אם selectedModel הוא image-gen — שולחים isImageModel=true לשרת
-//   שיצור תמונה. אחרת שולחים את התמונה כ-inlineData ל-vision.
-//   תמונות לא נשמרות בסופאבייס (נשמר רק הטקסט).
 // =============================================================================
 
 "use client";
@@ -27,19 +21,20 @@ import { ModelInfo } from '@/types/models';
 import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
 import OnboardingTour, { TOUR_DONE_KEY } from '@/components/OnboardingTour';
+import ApiKeyGuide from '@/components/ApiKeyGuide';
 import type { TourStep } from '@/components/OnboardingTour';
 import { User } from '@supabase/supabase-js';
 
 // ─── טיפוסים מקומיים ─────────────────────────────────────────────────────────
 interface RuleRecord { id: string; rule_text: string; }
 interface ChatRecord  { id: string; title: string; created_at: string; }
-interface DbMessage   { id: string; role: 'user' | 'model'; content: string; }
+interface DbMessage   { id: string; role: 'user' | 'model'; content: string; image_path?: string | null; image_mime_type?: string | null; }
 
-/** תמונה שהמשתמש בחר לפני השליחה */
 interface PendingImage {
-  base64: string;      // ללא prefix
-  mimeType: string;    // image/jpeg | image/png | image/webp
-  previewUrl: string;  // blob: URL להצגה ב-UI
+  base64: string;
+  mimeType: string;
+  previewUrl: string;
+  file: File;
 }
 
 const DEFAULT_MODEL_ID = "gemini-3.7-flash";
@@ -47,12 +42,12 @@ const DEFAULT_MODEL_ID = "gemini-3.7-flash";
 // ─── שלבי מדריך ההיכרות ────────────────────────────────────────────────────
 const TOUR_STEPS: TourStep[] = [
   { targetId: 'tour-model-select',  title: 'בחירת מודל AI',        text: 'בחרי כאן את המודל שתרצי לשוחח איתו — Flash מהיר, Pro חכם יותר, ומודל התמונות יוצר תמונות מטקסט.',       position: 'top' },
-  { targetId: 'tour-image-btn',     title: 'צירוף תמונה',          text: 'לחצי כאן כדי לצרף תמונה לשאלה — המודל יוכל לנתח ולתאר אותה.',                                          position: 'top' },
-  { targetId: 'tour-send-btn',      title: 'שליחת הודעה',          text: 'Enter לשליחה מהירה, Shift+Enter לשורה חדשה. כשבוחרים מודל תמונות הכפתור הופך ל"צור".',               position: 'top' },
+  { targetId: 'tour-send-btn',      title: 'שליחת הודעה',          text: 'Enter לשליחה מהירה, Shift+Enter לשורה חדשה.',               position: 'top' },
   { targetId: 'tour-btn-settings',  title: 'הגדרות',               text: 'כאן מגדירים מפתח API אישי (BYOK) ומודל ברירת מחדל. המפתח נשמר מאובטח בחשבון.',                       position: 'bottom' },
   { targetId: 'tour-btn-rules',     title: 'כללים וזיכרון',        text: 'הגדירי כללים קבועים לכל השיחות ("תמיד תענה בקצרה") או כללים ספציפיים לשיחה הנוכחית.',               position: 'bottom' },
   { targetId: 'tour-btn-consult',   title: 'חלון התייעצות',        text: 'פאנל צדדי שמאפשר לשאול שאלות על השיחה הראשית מבלי להפריע לה — שימושי לניתוח ולהבהרות.',            position: 'bottom' },
   { targetId: 'tour-btn-summary',   title: 'תקציר שיחה',           text: 'לאחר שיחה — לחצי כאן לקבלת תקציר חכם עם נקודות מרכזיות ומושגים חדשים. נשמר ב-DB אוטומטית.',        position: 'bottom' },
+  { targetId: 'tour-study-mode',    title: 'מצב לימודים',           text: 'הפעילי את המתג כדי להפוך את השיחה לתרגול. “רק מתשובת AI” שואל רק על מה שה-AI כתב בתשובה הנוכחית. “לפי הנושא שלי” שואל לפי שאלתך ויכול להוסיף ידע כללי, אבל רק אם הוא קשור ישירות לנושא שביקשת. המצב זמני לשיחה הנוכחית בלבד.', position: 'top' },
   { targetId: 'tour-sidebar',       title: 'היסטוריית שיחות',      text: 'כאן מוצגות כל השיחות הקודמות שלך. ניתן ללחוץ לפתיחה, לערוך כותרת, או למחוק.',                       position: 'right' },
 ];
 
@@ -107,6 +102,9 @@ export default function Home() {
   const [input, setInput] = useState('');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [studyMode, setStudyMode] = useState(false);
+  const [studyScores, setStudyScores] = useState<number[]>([]);
+  const [studyQuestionMode, setStudyQuestionMode] = useState<'ai' | 'user'>('ai');
 
   // 3. מודלים (Modals) וזיכרון
   const [isSideModalOpen, setIsSideModalOpen] = useState(false);
@@ -135,40 +133,38 @@ export default function Home() {
   const [isApiKeyLocked, setIsApiKeyLocked] = useState(false);
   const [currentModelName, setCurrentModelName] = useState(DEFAULT_MODEL_ID);
 
-  // 6. תמונה ממתינה לשליחה (vision או image-gen)
+  // 7. מדריך היכרות
+  const [isTourOpen, setIsTourOpen] = useState(false);
+  const [isApiGuideOpen, setIsApiGuideOpen] = useState(false);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  // 7. מדריך היכרות
-  const [isTourOpen, setIsTourOpen] = useState(false);
-
-  /** בודק אם המודל הנבחר הוא מודל יצירת תמונות */
-  const isImageGenModel = () =>
-    availableModels.find(m => m.id === selectedModel)?.capabilities.includes('image-gen') ?? false;
 
   const guestLimitReached = isGuest && mainMessages.some(msg => msg.role === 'user');
 
-  /** קריאת קובץ תמונה שהמשתמש בחר והמרתו ל-base64 */
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) return;
     const previewUrl = URL.createObjectURL(file);
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      // מסירים את prefix "data:image/...;base64,"
-      const base64 = dataUrl.split(',')[1];
-      setPendingImage({ base64, mimeType: file.type, previewUrl });
+      setPendingImage({ base64: dataUrl.split(',')[1], mimeType: file.type, previewUrl, file });
     };
     reader.readAsDataURL(file);
-    // מאפסים כדי שניתן לבחור את אותו קובץ שוב
-    e.target.value = '';
+    event.target.value = '';
   };
 
   // פונקציית עזר לבניית הוראות המערכת המאוחדות
   const getCombinedSystemInstructions = () => {
     const currentDate = new Date().toLocaleDateString('he-IL');
-    let combined = `התאריך היום הוא ${currentDate}.\n`;
+    let combined = `התאריך היום הוא ${currentDate}.
+הנחיות תשובה קבועות:
+- הצג מידע ברור, מדויק ומסודר, והפרד בין עובדות, הסבר ודוגמה כשזה עוזר להבנה.
+- השתמש בכותרות קצרות, רשימות או סמלים רק כאשר הם משפרים את ההבנה.
+- אל תשתמש בסימני # או * או בסמלים דקורטיביים מיותרים. השתמש בהם רק אם המשתמש ביקש אותם או אם הם חלק מהתוכן המבוקש, כגון קוד, מספר טלפון או סימון טכני.
+- אם המשתמש ביקש מכתב, קוד או טקסט להעתקה, הצג אותו נקי ומוכן להעתקה.
+`;
     if (globalRules.length > 0) {
       combined += "הוראות קבועות למערכת (חובה תמיד לציית):\n" + globalRules.map(r => "- " + r.rule_text).join("\n") + "\n\n";
     }
@@ -321,13 +317,23 @@ export default function Home() {
     setCurrentChatId(chatId);
     const { data } = await supabase
       .from('messages')
-      .select('id, role, content')
+      .select('id, role, content, image_path, image_mime_type')
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
     if (data) {
-      setMainMessages((data as DbMessage[]).map((msg) => ({
-        id: msg.id, role: msg.role, parts: [{ text: msg.content }],
-      })));
+      const messages = await Promise.all((data as DbMessage[]).map(async (msg) => {
+        let imageUrl: string | undefined;
+        if (msg.image_path) {
+          const { data: signed } = await supabase.storage.from('chat-images').createSignedUrl(msg.image_path, 60 * 60);
+          imageUrl = signed?.signedUrl;
+        }
+        return {
+          id: msg.id,
+          role: msg.role,
+          parts: [{ ...(imageUrl ? { imageUrl } : {}), text: msg.content }],
+        } as ChatMessageType;
+      }));
+      setMainMessages(messages);
       setCurrentModelName(selectedModel);
     }
   };
@@ -351,9 +357,12 @@ export default function Home() {
   };
 
   const handleDeleteChat = async (chatId: string) => {
+    const { data: imageMessages } = await supabase.from('messages').select('image_path').eq('chat_id', chatId).not('image_path', 'is', null);
     const { error } = await supabase.from('chats').delete().eq('id', chatId);
     // CASCADE ב-DB מוחק messages + chat_summaries אוטומטית
     if (!error) {
+      const imagePaths = (imageMessages ?? []).map((message) => message.image_path).filter((path): path is string => Boolean(path));
+      if (imagePaths.length > 0) await supabase.storage.from('chat-images').remove(imagePaths);
       setChatHistory(prev => prev.filter(c => c.id !== chatId));
       if (currentChatId === chatId) startNewChat();
     } else {
@@ -426,6 +435,9 @@ export default function Home() {
     setMainMessages([]);
     setCurrentChatId(null);
     setCurrentModelName(availableModels[0]?.id ?? DEFAULT_MODEL_ID);
+    setStudyMode(false);
+    setStudyScores([]);
+    setStudyQuestionMode('ai');
   };
 
   const startNewChat = () => {
@@ -435,6 +447,9 @@ export default function Home() {
     setCurrentModelName(selectedModel);
     setIsSummaryOpen(false);
     setEditingMessageId(null);
+    setStudyMode(false);
+    setStudyScores([]);
+    setStudyQuestionMode('ai');
   };
 
   const editLastPrompt = async (message: ChatMessageType) => {
@@ -512,40 +527,46 @@ export default function Home() {
       return;
     }
 
-    // מודל תמונה: מאפשר שליחה גם ללא טקסט (רק prompt ריק → "צור תמונה")
-    if (!input.trim() && !pendingImage && !isImageGenModel()) return;
+    if (!input.trim()) return;
     if (isWaiting) return;
+    if (!userApiKey.trim()) {
+      setIsApiGuideOpen(true);
+    }
 
     const userText = input;
-    const imageSnapshot = pendingImage; // שומרים לפני ניקוי ה-state
-
-    // בניית ה-parts להצגה ב-UI
-    const userParts: ChatMessageType['parts'] = [];
-    if (imageSnapshot) {
-      userParts.push({ imageUrl: imageSnapshot.previewUrl, inlineData: { mimeType: imageSnapshot.mimeType, data: imageSnapshot.base64 } });
-    }
-    if (userText.trim()) userParts.push({ text: userText });
+    const imageSnapshot = pendingImage;
 
     const userMessage: ChatMessageType = {
       role: 'user',
-      parts: userParts.length > 0 ? userParts : [{ text: '' }],
+      parts: [
+        ...(imageSnapshot ? [{ imageUrl: imageSnapshot.previewUrl, inlineData: { mimeType: imageSnapshot.mimeType, data: imageSnapshot.base64 } }] : []),
+        { text: userText },
+      ],
     };
 
     setMainMessages(prev => [...prev, userMessage]);
     setInput('');
-    setPendingImage(null); // מנקים את התמונה הממתינה
+    setPendingImage(null);
     setIsWaiting(true);
     setCountdown(15);
 
     try {
       let activeChatId = currentChatId;
       if (user) {
-        activeChatId = await ensureChatExists(userText || '🖼️ תמונה');
+        activeChatId = await ensureChatExists(userText);
         if (activeChatId) {
-          // שומרים בסופאבייס רק את הטקסט (תמונות לא נשמרות ב-DB כרגע)
+          let imagePath: string | null = null;
+          if (imageSnapshot) {
+            const extension = imageSnapshot.file.name.split('.').pop()?.toLowerCase() || 'jpg';
+            imagePath = `${user.id}/${activeChatId}/${crypto.randomUUID()}.${extension}`;
+            const { error: uploadError } = await supabase.storage
+              .from('chat-images')
+              .upload(imagePath, imageSnapshot.file, { contentType: imageSnapshot.mimeType, upsert: false });
+            if (uploadError) throw new Error('לא הצלחנו לשמור את התמונה. נסו שוב.');
+          }
           const { data: savedUserMessage } = await supabase
             .from('messages')
-            .insert([{ chat_id: activeChatId, role: 'user', content: userText || '[תמונה]' }])
+            .insert([{ chat_id: activeChatId, role: 'user', content: userText, image_path: imagePath, image_mime_type: imageSnapshot?.mimeType ?? null }])
             .select('id')
             .single();
           if (savedUserMessage) {
@@ -561,8 +582,6 @@ export default function Home() {
         .map(m => m.id)
         .filter(m => m !== selectedModel && !disabledModels.includes(m));
 
-      const imageGen = isImageGenModel();
-
       const response: GeminiResponse = await askGemini(
         userText,
         mainMessages,
@@ -573,19 +592,24 @@ export default function Home() {
         isGuest,
         imageSnapshot?.base64,
         imageSnapshot?.mimeType,
-        imageGen,
+        studyMode,
+        studyQuestionMode,
       );
 
-      // בניית ה-parts של התשובה (טקסט + תמונה שנוצרה אם יש)
+      // בניית חלקי התשובה הטקסטואליים
       const modelParts: ChatMessageType['parts'] = [];
-      if (response.generatedImage) modelParts.push({ generatedImage: response.generatedImage });
       if (response.text?.trim()) modelParts.push({ text: response.text });
 
       const modelMessage: ChatMessageType = {
         role: 'model',
         parts: modelParts.length > 0 ? modelParts : [{ text: response.text }],
+        studyScore: studyMode ? response.studyScore : undefined,
       };
       setMainMessages(prev => [...prev, modelMessage]);
+      setEditingMessageId(null);
+      if (studyMode && typeof response.studyScore === 'number') {
+        setStudyScores(prev => [...prev, response.studyScore as number]);
+      }
 
       if (user && activeChatId) {
         const { data: savedModelMessage } = await supabase
@@ -840,42 +864,24 @@ export default function Home() {
         {/* סרגל הקלדה */}
         <div className="bg-white/90 backdrop-blur-lg border-t border-slate-200 p-4 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-20 relative">
           
-          {/* תצוגה מקדימה של תמונה ממתינה */}
-          {pendingImage && (
-            <div className="w-full max-w-3xl mb-2 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={pendingImage.previewUrl} alt="תמונה נבחרת" className="h-14 w-14 object-cover rounded-xl shrink-0" />
-              <span className="text-sm text-slate-600 flex-1 font-medium truncate">תמונה מצורפת</span>
-              <button
-                onClick={() => { setPendingImage(null); URL.revokeObjectURL(pendingImage.previewUrl); }}
-                className="text-slate-400 hover:text-red-500 transition-colors text-lg"
-                title="הסרת תמונה"
-              >✕</button>
-            </div>
-          )}
-
           <div className="w-full max-w-3xl flex items-end gap-3 mb-3 relative">
-            {/* כפתור העלאת תמונה (נסתר אם מודל image-gen) */}
-            {!isImageGenModel() && (
-              <>
-                <input
-                  ref={imageInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  className="hidden"
-                  onChange={handleImageSelect}
-                />
-                <button
-                  onClick={() => imageInputRef.current?.click()}
-                  disabled={isWaiting || guestLimitReached}
-                  title="צרף תמונה לשאלה"
-                  data-tour-id="tour-image-btn"
-                  className="h-[56px] w-[56px] shrink-0 bg-slate-50 border border-slate-200 rounded-2xl hover:bg-teal-50 hover:border-teal-300 text-slate-500 hover:text-teal-600 transition-all flex items-center justify-center text-xl disabled:opacity-40"
-                >
-                  🖼️
-                </button>
-              </>
+            {pendingImage && (
+              <div className="absolute bottom-full right-0 mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={pendingImage.previewUrl} alt="תמונה שנבחרה" className="h-12 w-12 rounded-lg object-cover" />
+                <button onClick={() => { URL.revokeObjectURL(pendingImage.previewUrl); setPendingImage(null); }} className="text-xs font-bold text-slate-400 hover:text-red-500" aria-label="הסרת תמונה">✕</button>
+              </div>
             )}
+            <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleImageSelect} />
+            <button
+              onClick={() => imageInputRef.current?.click()}
+              disabled={isWaiting || guestLimitReached}
+              title="העלאת תמונה לניתוח ב-Gemini"
+              aria-label="העלאת תמונה לניתוח ב-Gemini"
+              className="h-[56px] w-[56px] shrink-0 rounded-2xl border border-slate-200 bg-slate-50 text-xl text-slate-500 transition-all hover:border-teal-300 hover:bg-teal-50 hover:text-teal-600 disabled:opacity-40"
+            >
+              🖼️
+            </button>
             <textarea
               rows={1}
               className="flex-1 min-h-[56px] max-h-40 resize-y p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:bg-white focus:ring-4 focus:ring-teal-500/15 focus:border-teal-400 shadow-inner text-base transition-all duration-300 disabled:opacity-50 disabled:bg-slate-100 leading-relaxed"
@@ -889,23 +895,50 @@ export default function Home() {
               }}
               placeholder={
                 guestLimitReached ? "הגעת למגבלת השאלות לאורח 🔒"
-                : isImageGenModel() ? "תאר תמונה ליצירה..."
-                : "מה נרצה לדעת או ליצור היום?..."
+                : "מה נרצה לדעת היום?..."
               }
               disabled={isWaiting || guestLimitReached}
             />
             <button
               onClick={handleMainSend}
-              disabled={isWaiting || guestLimitReached || (!input.trim() && !pendingImage && !isImageGenModel())}
+              disabled={isWaiting || guestLimitReached || !input.trim()}
               data-tour-id="tour-send-btn"
               className="h-[56px] bg-slate-800 text-white px-8 rounded-2xl hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 font-bold transition-all duration-300 shadow-md disabled:bg-slate-300 disabled:text-slate-500 disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2 group"
             >
-              <span>{isImageGenModel() ? 'צור' : 'שלח'}</span>
+              <span>שלח</span>
               <span className="group-hover:translate-x-1 transition-transform rtl:group-hover:-translate-x-1">←</span>
             </button>
           </div>
           
           <div className="w-full max-w-3xl flex items-center justify-between gap-3 text-[11px] text-slate-500 px-2">
+            <label className="flex items-center gap-2 rounded-xl border border-teal-100 bg-teal-50/60 px-2.5 py-1.5 font-bold text-teal-800" data-tour-id="tour-study-mode">
+              <span>🎓 מצב לימודים</span>
+              <input type="checkbox" checked={studyMode} onChange={(event) => setStudyMode(event.target.checked)} className="h-4 w-4 accent-teal-600" />
+            </label>
+            {studyMode && (
+              <div className="flex items-center gap-1 rounded-xl border border-teal-100 bg-white p-1 text-[10px] font-bold text-teal-800">
+                <button
+                  onClick={() => setStudyQuestionMode('ai')}
+                  className={`rounded-lg px-2 py-1 transition-colors ${studyQuestionMode === 'ai' ? 'bg-teal-600 text-white' : 'hover:bg-teal-50'}`}
+                  title="השאלה תהיה רק על תוכן תשובת ה-AI הנוכחית"
+                >
+                  רק מתשובת AI
+                </button>
+                <button
+                  onClick={() => setStudyQuestionMode('user')}
+                  className={`rounded-lg px-2 py-1 transition-colors ${studyQuestionMode === 'user' ? 'bg-teal-600 text-white' : 'hover:bg-teal-50'}`}
+                  title="השאלה תהיה לפי שאלת המשתמש והנושא שביקש, עם ידע כללי קשור בלבד"
+                >
+                  לפי הנושא שלי
+                </button>
+              </div>
+            )}
+            {studyMode && studyScores.length > 0 && (
+              <div className="flex items-center gap-2 rounded-xl border border-teal-100 bg-gradient-to-r from-teal-50 to-blue-50 px-2.5 py-1.5 font-bold text-teal-800 shadow-sm">
+                <span>📊 דיוק: {Math.round(studyScores.reduce((sum, score) => sum + score, 0) / studyScores.length)}%</span>
+                <span className="text-[10px] font-medium text-blue-700">({studyScores.length} שאלות)</span>
+              </div>
+            )}
             <label className="flex items-center gap-2 cursor-pointer group">
               <span className="font-medium group-hover:text-slate-700 transition-colors">מודל פעיל:</span>
               <select
@@ -946,6 +979,11 @@ export default function Home() {
         </div>
 
         {/* מודלים קופצים (Modals) */}
+        <ApiKeyGuide
+          isOpen={isApiGuideOpen}
+          onClose={() => setIsApiGuideOpen(false)}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
+        />
         <SideModal
           isOpen={isSideModalOpen}
           onClose={() => setIsSideModalOpen(false)}
@@ -1060,6 +1098,12 @@ export default function Home() {
                   <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
                     המפתח נשמר בצורה מאובטחת בחשבון שלך וישמש אותך בכל מחשב שממנו תתחברי. מומלץ למשתמשים כבדים.
                   </p>
+                  <button
+                    onClick={() => setIsApiGuideOpen(true)}
+                    className="mt-3 text-xs font-bold text-teal-700 hover:text-teal-800 hover:underline"
+                  >
+                    איך משיגים מפתח מ־Google AI Studio?
+                  </button>
                 </div>
 
                 <div className="pt-2">
