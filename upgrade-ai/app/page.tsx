@@ -441,9 +441,31 @@ export default function Home() {
     setIsLoadingAuth(false);
   };
 
+  const clearGuestSession = async () => {
+    try {
+      await fetch('/api/guest', { method: 'DELETE', credentials: 'include' });
+    } catch {
+      // מותר להמשיך גם אם מחיקת ה-cookie נכשלה; המצב האורח יוסר מקומית.
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    setIsGuest(false);
+    if (isGuest) {
+      await clearGuestSession();
+    }
+    setMainMessages([]);
+    setCurrentChatId(null);
+    setCurrentModelName(availableModels[0]?.id ?? DEFAULT_MODEL_ID);
+    setStudyMode(false);
+    setStudyScores([]);
+    setStudyQuestionMode('ai');
+  };
+
+  const leaveGuestMode = async () => {
+    await clearGuestSession();
     setIsGuest(false);
     setMainMessages([]);
     setCurrentChatId(null);
@@ -789,6 +811,15 @@ export default function Home() {
           </div>
           
           <div className="flex gap-2 flex-wrap justify-end max-w-3xl">
+            {isGuest && (
+              <button
+                onClick={leaveGuestMode}
+                className="bg-white border border-violet-200 text-violet-700 px-3 py-2 rounded-xl hover:bg-violet-50 hover:border-violet-300 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
+                title="חזרה למסך הכניסה"
+              >
+                <span>🔐</span> התחברות
+              </button>
+            )}
             {/* כפתור תדריך — תמיד גלוי, מאפשר הפעלה מחדש */}
             <button
               onClick={() => { localStorage.removeItem(TOUR_DONE_KEY); setIsTourOpen(true); }}
