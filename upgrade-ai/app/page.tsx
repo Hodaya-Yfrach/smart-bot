@@ -88,6 +88,7 @@ export default function Home() {
   // 1. משתמשים
   const [user, setUser] = useState<User | null>(null);
   const [isGuest, setIsGuest] = useState(false);
+  const [isCheckingAccess, setIsCheckingAccess] = useState(true);
   const [isLoginMode, setIsLoginMode] = useState(true); // מעבר בין התחברות להרשמה
   const [fullName, setFullName] = useState(''); // שם
   const [phone, setPhone] = useState('');       // טלפון
@@ -177,8 +178,20 @@ export default function Home() {
   // --- Effects ---
   useEffect(() => {
     const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) setUser(session.user);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          setUser(session.user);
+        } else {
+          const response = await fetch('/api/guest', { credentials: 'include' });
+          const data = await response.json();
+          if (response.ok && data.isGuest) setIsGuest(true);
+        }
+      } catch {
+        // מצב האורח יישאר כבוי אם לא ניתן לבדוק את ה-cookie.
+      } finally {
+        setIsCheckingAccess(false);
+      }
     };
     checkUser();
   }, []);
@@ -661,6 +674,8 @@ export default function Home() {
   // --- רינדור מסכים ---
 
   // --- רינדור מסך התחברות / הרשמה ---
+  if (isCheckingAccess) return null;
+
   if (!user && !isGuest) {
     return (
       <div dir="rtl" className="flex h-[100dvh] items-center justify-center px-4 bg-gradient-to-br from-slate-50 via-violet-50/40 to-blue-50/40">
@@ -679,7 +694,7 @@ export default function Home() {
           </div>
 
           {/* כרטיס */}
-          <div className="bg-white rounded-3xl shadow-xl shadow-violet-100/50 border border-slate-100 p-8">
+          <div className="rainbow-border bg-white rounded-3xl shadow-xl shadow-violet-100/50 border border-slate-100 p-8">
             <div className="space-y-3">
               {!isLoginMode && (
                 <>
@@ -740,7 +755,7 @@ export default function Home() {
 
   // --- המסך הראשי ---
   return (
-    <div dir="rtl" className="flex h-[100dvh] overflow-hidden text-slate-800 relative font-sans"
+    <div dir="rtl" className="rainbow-border flex h-[100dvh] overflow-hidden text-slate-800 relative font-sans"
       style={{ background: 'linear-gradient(160deg, #f0f4ff 0%, #faf5ff 50%, #eff6ff 100%)' }}>
 
       {/* תפריט צד (Sidebar) */}
@@ -764,7 +779,7 @@ export default function Home() {
       <main className="flex-1 flex flex-col relative h-full overflow-hidden bg-white/70 backdrop-blur-sm">
 
         {/* האדר */}
-        <header className="bg-white/80 backdrop-blur-xl text-slate-800 p-4 z-20 flex justify-between items-center border-b border-violet-100/60 shrink-0 shadow-[0_2px_20px_rgba(124,58,237,0.06)] relative">
+        <header className="rainbow-border bg-white/80 backdrop-blur-xl text-slate-800 p-4 z-20 flex justify-between items-center border-b border-violet-100/60 shrink-0 shadow-[0_2px_20px_rgba(124,58,237,0.06)] relative">
           <div>
             <h1 className="text-xl font-extrabold tracking-tight"
               style={{ background: 'linear-gradient(90deg, #7c3aed, #2563eb)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
@@ -862,7 +877,7 @@ export default function Home() {
         </div>
 
         {/* סרגל הקלדה */}
-        <div className="bg-white/90 backdrop-blur-lg border-t border-slate-200 p-4 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-20 relative">
+        <div className="rainbow-border bg-white/90 backdrop-blur-lg border-t border-slate-200 p-4 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-20 relative">
           
           <div className="w-full max-w-3xl flex items-end gap-3 mb-3 relative">
             {pendingImage && (

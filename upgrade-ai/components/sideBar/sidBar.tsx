@@ -45,7 +45,7 @@ export default function Sidebar({
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <aside className={`${isOpen ? 'w-72 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-50 max-md:shadow-[0_0_50px_rgba(0,0,0,0.15)]' : 'w-16 max-md:w-0 max-md:border-none'} shrink-0 bg-white text-slate-800 border-l border-slate-100 transition-all duration-300 flex flex-col z-30 relative`}>
+    <aside className={`rainbow-border ${isOpen ? 'w-72 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-50 max-md:shadow-[0_0_50px_rgba(0,0,0,0.15)]' : 'w-16 max-md:w-0 max-md:border-none'} shrink-0 bg-white text-slate-800 border-l border-slate-100 transition-all duration-300 flex flex-col z-30 relative`}>
       
       {/* האדר הסרגל */}
       <div className="p-4 flex items-center justify-between border-b border-slate-100 min-h-[76px] bg-slate-50/50 shrink-0">
