@@ -700,11 +700,11 @@ export default function Home() {
 
   if (!user && !isGuest) {
     return (
-      <div dir="rtl" className="flex h-[100dvh] items-center justify-center px-4 bg-gradient-to-br from-slate-50 via-violet-50/40 to-blue-50/40">
+      <div dir="rtl" className="flex min-h-[100dvh] items-center justify-center px-3 py-6 sm:px-4 bg-gradient-to-br from-slate-50 via-violet-50/40 to-blue-50/40">
 
-        <div className="w-full max-w-sm">
+        <div className="w-full max-w-md sm:max-w-sm">
           {/* לוגו + כותרת */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-6 sm:mb-8">
             <div className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center text-3xl shadow-lg shadow-violet-200 rotate-3"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #2563eb)' }}>
               🤖
@@ -716,7 +716,7 @@ export default function Home() {
           </div>
 
           {/* כרטיס */}
-          <div className="rainbow-border bg-white rounded-3xl shadow-xl shadow-violet-100/50 border border-slate-100 p-8">
+          <div className="rainbow-border bg-white rounded-3xl shadow-xl shadow-violet-100/50 border border-slate-100 p-5 sm:p-8">
             <div className="space-y-3">
               {!isLoginMode && (
                 <>
@@ -801,16 +801,16 @@ export default function Home() {
       <main className="flex-1 flex flex-col relative h-full overflow-hidden bg-white/70 backdrop-blur-sm">
 
         {/* האדר */}
-        <header className="rainbow-border bg-white/80 backdrop-blur-xl text-slate-800 p-4 z-20 flex justify-between items-center border-b border-violet-100/60 shrink-0 shadow-[0_2px_20px_rgba(124,58,237,0.06)] relative">
-          <div>
+        <header className="rainbow-border bg-white/80 backdrop-blur-xl text-slate-800 p-3 sm:p-4 z-20 flex flex-col gap-3 border-b border-violet-100/60 shrink-0 shadow-[0_2px_20px_rgba(124,58,237,0.06)] relative md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
             <h1 className="text-xl font-extrabold tracking-tight"
               style={{ background: 'linear-gradient(90deg, #7c3aed, #2563eb)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
               AI Workspace
             </h1>
-            {user && <span className="text-[11px] font-medium text-slate-400 tracking-wide">{user.email}</span>}
+            {user && <span className="block text-[11px] font-medium text-slate-400 tracking-wide truncate">{user.email}</span>}
           </div>
           
-          <div className="flex gap-2 flex-wrap justify-end max-w-3xl">
+          <div className="flex w-full flex-wrap justify-end gap-2 md:max-w-3xl">
             {isGuest && (
               <button
                 onClick={leaveGuestMode}
@@ -908,9 +908,9 @@ export default function Home() {
         </div>
 
         {/* סרגל הקלדה */}
-        <div className="rainbow-border bg-white/90 backdrop-blur-lg border-t border-slate-200 p-4 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-20 relative">
+        <div className="rainbow-border bg-white/90 backdrop-blur-lg border-t border-slate-200 p-3 sm:p-4 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-20 relative">
           
-          <div className="w-full max-w-3xl flex items-end gap-3 mb-3 relative">
+          <div className="w-full max-w-3xl flex flex-col gap-3 mb-3 relative sm:flex-row sm:items-end">
             {pendingImage && (
               <div className="absolute bottom-full right-0 mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -924,13 +924,13 @@ export default function Home() {
               disabled={isWaiting || guestLimitReached}
               title="העלאת תמונה לניתוח ב-Gemini"
               aria-label="העלאת תמונה לניתוח ב-Gemini"
-              className="h-[56px] w-[56px] shrink-0 rounded-2xl border border-slate-200 bg-slate-50 text-xl text-slate-500 transition-all hover:border-teal-300 hover:bg-teal-50 hover:text-teal-600 disabled:opacity-40"
+              className="h-[52px] w-[52px] shrink-0 rounded-2xl border border-slate-200 bg-slate-50 text-xl text-slate-500 transition-all hover:border-teal-300 hover:bg-teal-50 hover:text-teal-600 disabled:opacity-40 sm:h-[56px] sm:w-[56px]"
             >
               🖼️
             </button>
             <textarea
               rows={1}
-              className="flex-1 min-h-[56px] max-h-40 resize-y p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:bg-white focus:ring-4 focus:ring-teal-500/15 focus:border-teal-400 shadow-inner text-base transition-all duration-300 disabled:opacity-50 disabled:bg-slate-100 leading-relaxed"
+              className="flex-1 min-h-[52px] max-h-40 resize-y p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:bg-white focus:ring-4 focus:ring-teal-500/15 focus:border-teal-400 shadow-inner text-base transition-all duration-300 disabled:opacity-50 disabled:bg-slate-100 leading-relaxed sm:min-h-[56px]"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -949,14 +949,14 @@ export default function Home() {
               onClick={handleMainSend}
               disabled={isWaiting || guestLimitReached || !input.trim()}
               data-tour-id="tour-send-btn"
-              className="h-[56px] bg-slate-800 text-white px-8 rounded-2xl hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 font-bold transition-all duration-300 shadow-md disabled:bg-slate-300 disabled:text-slate-500 disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2 group"
+              className="h-[52px] w-full bg-slate-800 text-white px-6 rounded-2xl hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 font-bold transition-all duration-300 shadow-md disabled:bg-slate-300 disabled:text-slate-500 disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2 group sm:h-[56px] sm:w-auto sm:px-8"
             >
               <span>שלח</span>
               <span className="group-hover:translate-x-1 transition-transform rtl:group-hover:-translate-x-1">←</span>
             </button>
           </div>
           
-          <div className="w-full max-w-3xl flex items-center justify-between gap-3 text-[11px] text-slate-500 px-2">
+          <div className="w-full max-w-3xl flex flex-col gap-3 text-[11px] text-slate-500 px-1 md:flex-row md:items-center md:justify-between">
             <label className="flex items-center gap-2 rounded-xl border border-teal-100 bg-teal-50/60 px-2.5 py-1.5 font-bold text-teal-800" data-tour-id="tour-study-mode">
               <span>🎓 מצב לימודים</span>
               <input type="checkbox" checked={studyMode} onChange={(event) => setStudyMode(event.target.checked)} className="h-4 w-4 accent-teal-600" />
@@ -985,10 +985,10 @@ export default function Home() {
                 <span className="text-[10px] font-medium text-blue-700">({studyScores.length} שאלות)</span>
               </div>
             )}
-            <label className="flex items-center gap-2 cursor-pointer group">
+            <label className="flex max-w-full items-center gap-2 cursor-pointer group">
               <span className="font-medium group-hover:text-slate-700 transition-colors">מודל פעיל:</span>
               <select
-                className="w-60 border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100"
+                className="w-full max-w-[10rem] border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100 sm:max-w-[14rem]"
                 data-tour-id="tour-model-select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
@@ -1005,7 +1005,7 @@ export default function Home() {
                 )}
               </select>
             </label>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
               <span className="hidden sm:inline">Enter לשליחה · Shift+Enter לשורה חדשה</span>
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${isGuest && guestLimitReached ? 'bg-red-400' : 'bg-green-400'}`}></div>
