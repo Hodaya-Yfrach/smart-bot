@@ -67,4 +67,13 @@ export async function POST(req: Request) {
   }
 }
 
+export async function GET(req: Request) {
+  try {
+    const guestToken = req.headers.get('cookie')?.match(new RegExp(`${COOKIE_NAME}=([^;]+)`))?.[1];
+    return NextResponse.json({ isGuest: isValidToken(guestToken) });
+  } catch {
+    return NextResponse.json({ isGuest: false });
+  }
+}
+
 export { COOKIE_NAME, isValidToken };
