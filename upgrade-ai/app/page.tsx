@@ -37,7 +37,7 @@ interface PendingImage {
   file: File;
 }
 
-const DEFAULT_MODEL_ID = "gemini-3.7-flash";
+const DEFAULT_MODEL_ID = "gemini-3.8-flash";
 
 // ─── שלבי מדריך ההיכרות ────────────────────────────────────────────────────
 const TOUR_STEPS: TourStep[] = [

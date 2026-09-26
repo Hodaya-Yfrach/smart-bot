@@ -196,6 +196,7 @@ export async function POST(req: Request) {
     const modelsToTry = [selectedModel, ...(fallbackModels || [])].filter(Boolean);
     const failedModels: string[] = [];
     let networkBlocked = false;
+    let modelNotFoundOccurred = false;
 
     for (const modelName of modelsToTry) {
       try {
@@ -255,6 +256,18 @@ export async function POST(req: Request) {
           }, { status: 429, headers: { 'Retry-After': '60' } });
         }
 
+        // מודל שלא קיים / לא זמין למפתח ה-API הנוכחי (404 מגוגל) —
+        // קורה כשמנסים מזהה מודל שאינו ברשימת ה-ListModels של המפתח הזה
+        // (למשל מודל preview/ניסיוני שנסגר, או typo במזהה). חשוב להבדיל
+        // מזה משגיאת רשת/מכסה רגילה כדי שההודעה תכוון לתקן את הבחירה
+        // ולא רק "לנסות שוב".
+        const isModelNotFoundError =
+          errorMessage.includes('404') ||
+          /not found|is not supported|does not exist|invalid model/i.test(errorMessage);
+        if (isModelNotFoundError) {
+          modelNotFoundOccurred = true;
+        }
+
         failedModels.push(modelName);
 
         // NetFree חוסם את Gemini — אין טעם לנסות מודלים נוספים
@@ -272,6 +285,17 @@ export async function POST(req: Request) {
           'החיבור ל-Gemini נחסם על ידי NetFree. יש לאשר את generativelanguage.googleapis.com בסינון, או להתחבר מרשת שאינה חוסמת את שירותי Google AI.',
         failedModels,
       }, { status: 502 });
+    }
+
+    // כשל כי המודל/ים שנבחרו לא קיימים בכלל עבור המפתח הזה (לא בעיית רשת/מכסה) —
+    // הודעה ממוקדת שמפנה לעדכן את רשימת המודלים ב-services/models.ts
+    // ולוודא שהמזהה קיים ב-ListModels של המפתח (ולא רק הועתק מדוגמה כלשהי).
+    if (modelNotFoundOccurred) {
+      return NextResponse.json({
+        error:
+          'אחד או יותר מהמודלים שנבחרו אינם זמינים עבור מפתח ה-API שלכם. ודאו שמזהה המודל מופיע ברשימת המודלים הזמינה למפתח שלכם (ListModels) ב-Google AI Studio, ושהוא מוגדר נכון ב-services/models.ts.',
+        failedModels,
+      }, { status: 404 });
     }
 
     return NextResponse.json({
