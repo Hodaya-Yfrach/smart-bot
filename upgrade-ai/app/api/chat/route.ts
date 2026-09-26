@@ -242,26 +242,10 @@ export async function POST(req: Request) {
         });
 
       } catch (err: any) {
-        const errorMessage = err?.message || 'Unknown error';
-        console.error(`Gemini request failed for ${modelName}:`, errorMessage);
-
-        const isQuotaError =
-          errorMessage.includes('429') ||
-          /quota|rate.?limit|resource.?exhausted|too many requests/i.test(errorMessage);
-        if (isQuotaError) {
-          return NextResponse.json({
-            error: 'מכסת השימוש ב-Gemini הסתיימה או שהגעתם למגבלת הקצב. נסו שוב מאוחר יותר או הגדירו מפתח Gemini אישי בהגדרות.',
-            failedModels: [modelName],
-          }, { status: 429, headers: { 'Retry-After': '60' } });
-        }
-
-        failedModels.push(modelName);
-
-        // NetFree חוסם את Gemini — אין טעם לנסות מודלים נוספים
-        if (errorMessage.includes('NetFree') || errorMessage.includes('418 Blocked')) {
-          networkBlocked = true;
-          break;
-        }
+        // שומרים גם את קוד הסטטוס (429/403/500 וכו') כדי שהלקוח יוכל להציג סיבה מדויקת
+        const status = err?.status || err?.response?.status || null;
+        console.error(`ניסיון כשל במודל ${modelName} (status: ${status}):`, err.message);
+        failedModels.push(modelName); // רושמים אותו כנכשל ועוברים מיד לבא בתור
       }
     }
 

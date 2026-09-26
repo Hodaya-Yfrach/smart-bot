@@ -37,28 +37,33 @@ interface PendingImage {
   file: File;
 }
 
-const DEFAULT_MODEL_ID = "gemini-3.7-flash";
+interface DbMessage {
+  role: 'user' | 'model';
+  content: string;
+}
 
-// ─── שלבי מדריך ההיכרות ────────────────────────────────────────────────────
-const TOUR_STEPS: TourStep[] = [
-  { targetId: 'tour-model-select',  title: 'בחירת מודל AI',        text: 'בחר כאן את המודל שתרצה לשוחח איתו — Flash מהיר, Pro חכם יותר, ומודל התמונות יוצר תמונות מטקסט.',       position: 'top' },
-  { targetId: 'tour-send-btn',      title: 'שליחת הודעה',          text: 'Enter לשליחה מהירה, Shift+Enter לשורה חדשה.',               position: 'top' },
-  { targetId: 'tour-btn-settings',  title: 'הגדרות',               text: 'כאן מגדירים מפתח API אישי (BYOK) ומודל ברירת מחדל. המפתח נשמר מאובטח בחשבון.',                       position: 'bottom' },
-  { targetId: 'tour-btn-rules',     title: 'כללים וזיכרון',        text: 'הגדר כללים קבועים לכל השיחות ("תמיד תענה בקצרה") או כללים ספציפיים לשיחה הנוכחית.',               position: 'bottom' },
-  { targetId: 'tour-btn-consult',   title: 'חלון התייעצות',        text: 'פאנל צדדי שמאפשר לשאול שאלות על השיחה הראשית מבלי להפריע לה — שימושי לניתוח ולהבהרות.',            position: 'bottom' },
-  { targetId: 'tour-btn-summary',   title: 'תקציר שיחה',           text: 'לאחר שיחה — לחץ כאן לקבלת תקציר חכם עם נקודות מרכזיות ומושגים חדשים. נשמר ב-DB אוטומטית.',        position: 'bottom' },
-  { targetId: 'tour-study-mode',    title: 'מצב לימודים',           text: 'הפעל את המתג כדי להפוך את השיחה לתרגול. “רק מתשובת AI” שואל רק על מה שה-AI כתב בתשובה הנוכחית. “לפי הנושא שלי” שואל לפי שאלתך ויכול להוסיף ידע כללי, אבל רק אם הוא קשור ישירות לנושא שביקשת. המצב זמני לשיחה הנוכחית בלבד.', position: 'top' },
-  { targetId: 'tour-sidebar',       title: 'היסטוריית שיחות',      text: 'כאן מוצגות כל השיחות הקודמות שלך. ניתן ללחוץ לפתיחה, לערוך כותרת, או למחוק.',                       position: 'right' },
+const AVAILABLE_MODELS = [
+  "gemini-flash-latest",      // מהיר, תמיד הגרסה העדכנית ביותר - ברירת מחדל
+  "gemini-3.8-flash",         // מהיר, גרסה עדכנית ומוגדרת
+  "gemini-3.1-flash-lite",    // מהיר וקל, גיבוי טוב תחת עומס
+  "gemini-pro-latest",        // חשיבה עמוקה (Pro) - תמיד הגרסה העדכנית ביותר
+  "gemini-3.1-pro-preview"    // חשיבה עמוקה (Pro) - גרסה preview נוספת
 ];
 
-const getModelDisplayName = (models: ModelInfo[], name: string): string => {
-  const baseName = name.replace(' (גיבוי)', '');
-  const found = models.find(m => m.id === baseName);
-  const displayName = found?.displayName || baseName;
-  return name.includes(' (גיבוי)') ? `${displayName} (גיבוי)` : displayName;
+// שמות ידידותיים למשתמש שיוצגים בתפריט הבחירה, במקום שם המודל הטכני של גוגל.
+// כל שינוי עתידי ב-AVAILABLE_MODELS צריך להתלוות בעדכון כאן.
+const MODEL_LABELS: Record<string, string> = {
+  "gemini-flash-latest": "⚡ מהיר (מומלץ - הכי עדכני)",
+  "gemini-3.8-flash": "⚡ מהיר (גרסה יציבה)",
+  "gemini-3.1-flash-lite": "🪶 מהיר וקל (חסכוני, לשאלות פשוטות)",
+  "gemini-pro-latest": "🧠 חשיבה עמוקה (מומלץ - הכי עדכני)",
+  "gemini-3.1-pro-preview": "🧠 חשיבה עמוקה (גרסה נוספת)",
 };
 
-// DEV NOTE: החלף למייל שלך
+// עוזר להצגת שם ידידותי בכל מקום שבו מוצג שם מודל למשתמש; נופל חזרה לשם הטכני אם חסר מיפוי
+const getModelLabel = (modelId: string) => MODEL_LABELS[modelId] || modelId;
+
+// כתובת המייל שאליה כפתור "תמיכה" יפנה - **חשוב: תחליפי כאן למייל שלך בפועל**
 const SUPPORT_EMAIL = '8564417@gmail.com';
 
 // תרגום שגיאות Supabase לעברית
@@ -247,6 +252,7 @@ export default function Home() {
           if (profile.preferred_model) {
             setSelectedModel(profile.preferred_model);
             setCurrentModelName(profile.preferred_model);
+            setIsFallbackActive(false);
           }
         }
 
@@ -469,10 +475,8 @@ export default function Home() {
     setIsGuest(false);
     setMainMessages([]);
     setCurrentChatId(null);
-    setCurrentModelName(availableModels[0]?.id ?? DEFAULT_MODEL_ID);
-    setStudyMode(false);
-    setStudyScores([]);
-    setStudyQuestionMode('ai');
+    setCurrentModelName(AVAILABLE_MODELS[0]);
+    setIsFallbackActive(false);
   };
 
   const startNewChat = () => {
@@ -480,27 +484,7 @@ export default function Home() {
     setCurrentChatId(null);
     setChatRules([]);
     setCurrentModelName(selectedModel);
-    setIsSummaryOpen(false);
-    setEditingMessageId(null);
-    setStudyMode(false);
-    setStudyScores([]);
-    setStudyQuestionMode('ai');
-  };
-
-  const editLastPrompt = async (message: ChatMessageType) => {
-    if (message.role !== 'user' || !message.id || !currentChatId) return;
-    const messageIndex = mainMessages.findIndex((item) => item.id === message.id);
-    if (messageIndex < 0) return;
-
-    const idsToRemove = mainMessages.slice(messageIndex).map((item) => item.id).filter(Boolean) as string[];
-    const { error } = await supabase.from('messages').delete().in('id', idsToRemove);
-    if (error) { alert('לא ניתן לערוך את ההודעה כרגע.'); return; }
-
-    setMainMessages(mainMessages.slice(0, messageIndex));
-    setInput(message.parts.find(p => p.text !== undefined)?.text ?? '');
-    setEditingMessageId(message.id);
-    // מוחקים תקציר ישן כי השיחה השתנתה
-    await supabase.from('chat_summaries').delete().eq('chat_id', currentChatId);
+    setIsFallbackActive(false);
   };
 
   const handleCopySupportEmail = async () => {
@@ -660,11 +644,13 @@ export default function Home() {
       }
 
       if (response.modelUsed !== selectedModel) {
-        setCurrentModelName(`${response.modelUsed} (גיבוי)`);
-        setToastMessage(`עקב עומס, הועברת אוטומטית למודל ${getModelDisplayName(availableModels, response.modelUsed)}`);
+        setCurrentModelName(response.modelUsed);
+        setIsFallbackActive(true);
+        setToastMessage(`עקב עומס, הועברת אוטומטית למודל ${getModelLabel(response.modelUsed)}`);
         setTimeout(() => setToastMessage(null), 4000);
       } else {
         setCurrentModelName(selectedModel);
+        setIsFallbackActive(false);
       }
 
       if (response.failedModels && response.failedModels.length > 0) {
@@ -955,65 +941,9 @@ export default function Home() {
               <span className="group-hover:translate-x-1 transition-transform rtl:group-hover:-translate-x-1">←</span>
             </button>
           </div>
-          
-          <div className="w-full max-w-3xl flex flex-col gap-3 text-[11px] text-slate-500 px-1 md:flex-row md:items-center md:justify-between">
-            <label className="flex items-center gap-2 rounded-xl border border-teal-100 bg-teal-50/60 px-2.5 py-1.5 font-bold text-teal-800" data-tour-id="tour-study-mode">
-              <span>🎓 מצב לימודים</span>
-              <input type="checkbox" checked={studyMode} onChange={(event) => setStudyMode(event.target.checked)} className="h-4 w-4 accent-teal-600" />
-            </label>
-            {studyMode && (
-              <div className="flex items-center gap-1 rounded-xl border border-teal-100 bg-white p-1 text-[10px] font-bold text-teal-800">
-                <button
-                  onClick={() => setStudyQuestionMode('ai')}
-                  className={`rounded-lg px-2 py-1 transition-colors ${studyQuestionMode === 'ai' ? 'bg-teal-600 text-white' : 'hover:bg-teal-50'}`}
-                  title="השאלה תהיה רק על תוכן תשובת ה-AI הנוכחית"
-                >
-                  רק מתשובת AI
-                </button>
-                <button
-                  onClick={() => setStudyQuestionMode('user')}
-                  className={`rounded-lg px-2 py-1 transition-colors ${studyQuestionMode === 'user' ? 'bg-teal-600 text-white' : 'hover:bg-teal-50'}`}
-                  title="השאלה תהיה לפי שאלת המשתמש והנושא שביקש, עם ידע כללי קשור בלבד"
-                >
-                  לפי הנושא שלי
-                </button>
-              </div>
-            )}
-            {studyMode && studyScores.length > 0 && (
-              <div className="flex items-center gap-2 rounded-xl border border-teal-100 bg-gradient-to-r from-teal-50 to-blue-50 px-2.5 py-1.5 font-bold text-teal-800 shadow-sm">
-                <span>📊 דיוק: {Math.round(studyScores.reduce((sum, score) => sum + score, 0) / studyScores.length)}%</span>
-                <span className="text-[10px] font-medium text-blue-700">({studyScores.length} שאלות)</span>
-              </div>
-            )}
-            <label className="flex max-w-full items-center gap-2 cursor-pointer group">
-              <span className="font-medium group-hover:text-slate-700 transition-colors">מודל פעיל:</span>
-              <select
-                className="w-full max-w-[10rem] border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-2 focus:ring-teal-500/30 outline-none transition-all cursor-pointer hover:bg-slate-100 sm:max-w-[14rem]"
-                data-tour-id="tour-model-select"
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                disabled={modelsLoading}
-              >
-                {modelsLoading ? (
-                  <option>טוען מודלים...</option>
-                ) : (
-                  availableModels.map(model => (
-                    <option key={model.id} value={model.id} disabled={disabledModels.includes(model.id)}>
-                      {model.displayName} {disabledModels.includes(model.id) ? '(עמוס)' : ''}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-              <span className="hidden sm:inline">Enter לשליחה · Shift+Enter לשורה חדשה</span>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${isGuest && guestLimitReached ? 'bg-red-400' : 'bg-green-400'}`}></div>
-                <span className="font-medium">
-                  {isGuest ? (guestLimitReached ? "נגמרו שאלות האורח" : "אורח: 1/1 שאלות") : getModelDisplayName(availableModels, currentModelName)}
-                </span>
-              </div>
-            </div>
+          <div className="w-full max-w-3xl text-xs text-gray-400 text-right px-2 flex justify-between">
+            <span>מודל פעיל כעת: <span className="font-medium text-gray-500">{getModelLabel(currentModelName)}{isFallbackActive ? ' (גיבוי)' : ''}</span></span>
+            {isGuest && <span className="text-amber-600 font-medium">{guestLimitReached ? "נגמרו השאלות לאורח" : "שאלה 1 מתוך 1"}</span>}
           </div>
           
           {editingMessageId && (
@@ -1107,15 +1037,11 @@ export default function Home() {
                     onChange={(e) => setSelectedModel(e.target.value)}
                     disabled={modelsLoading}
                   >
-                    {modelsLoading ? (
-                      <option>טוען מודלים...</option>
-                    ) : (
-                      availableModels.map(model => (
-                        <option key={model.id} value={model.id} disabled={disabledModels.includes(model.id)}>
-                          {model.displayName} {disabledModels.includes(model.id) ? '(עמוס כרגע - יתפנה בקרוב)' : ''}
-                        </option>
-                      ))
-                    )}
+                    {AVAILABLE_MODELS.map(model => (
+                      <option key={model} value={model} disabled={disabledModels.includes(model)}>
+                        {MODEL_LABELS[model] || model} {disabledModels.includes(model) ? '(עמוס כרגע - יתפנה בקרוב)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
