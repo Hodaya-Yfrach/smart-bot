@@ -1,4 +1,11 @@
 
+// =============================================================================
+// app/forgot-password/page.tsx
+// שליחת מייל לאיפוס סיסמה דרך Supabase Auth.
+// Supabase שולח קישור עם token → המשתמש מגיע ל-/update-password.
+// DEV NOTE: ה-redirectTo חייב להיות מורשה ב-Supabase Dashboard → Auth → URL Config.
+// =============================================================================
+
 'use client'
 
 import { useState } from 'react'

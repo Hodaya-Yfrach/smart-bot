@@ -1,25 +1,40 @@
+// =============================================================================
+// app/page.tsx — דף הבית הראשי (Client Component)
+//
+// אחראי על:
+//   - מסך התחברות / הרשמה / אורח
+//   - ממשק הצ'אט: שליחת הודעות, היסטוריה, עריכת הודעה אחרונה
+//   - ניהול כללים (גלובליים + לשיחה), הגדרות BYOK, תקציר שיחה
+//
+// =============================================================================
+
 "use client";
-import { verifySitePassword } from './actions';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import ChatMessage from '@/components/ChatMessage';
 import SideModal from '@/components/SideModal';
+import ChatSummaryPanel from '@/components/sideBar/ChatSummaryPanel';
 import Sidebar from '@/components/sideBar/sidBar';
 import { ChatMessage as ChatMessageType, GeminiResponse } from '@/types/chat';
+import { ChatSummary } from '@/types/chatSummary';
+import { ModelInfo } from '@/types/models';
 import { askGemini, ChatApiError } from '@/services/gemini';
 import { supabase } from '@/services/supabase';
+import OnboardingTour, { TOUR_DONE_KEY } from '@/components/OnboardingTour';
+import ApiKeyGuide from '@/components/ApiKeyGuide';
+import type { TourStep } from '@/components/OnboardingTour';
 import { User } from '@supabase/supabase-js';
 
-// --- הגדרות טיפוסים מקומיות למניעת שגיאות TS ---
-interface RuleRecord {
-  id: string;
-  rule_text: string;
-}
+// ─── טיפוסים מקומיים ─────────────────────────────────────────────────────────
+interface RuleRecord { id: string; rule_text: string; }
+interface ChatRecord  { id: string; title: string; created_at: string; }
+interface DbMessage   { id: string; role: 'user' | 'model'; content: string; image_path?: string | null; image_mime_type?: string | null; }
 
-interface ChatRecord {
-  id: string;
-  title: string;
-  created_at: string;
+interface PendingImage {
+  base64: string;
+  mimeType: string;
+  previewUrl: string;
+  file: File;
 }
 
 interface DbMessage {
@@ -51,12 +66,12 @@ const getModelLabel = (modelId: string) => MODEL_LABELS[modelId] || modelId;
 // כתובת המייל שאליה כפתור "תמיכה" יפנה - **חשוב: תחליפי כאן למייל שלך בפועל**
 const SUPPORT_EMAIL = '8564417@gmail.com';
 
-// פונקציית עזר לתרגום שגיאות Supabase לעברית מובנת
+// תרגום שגיאות Supabase לעברית
 const getHebrewAuthError = (errorMsg: string) => {
   const msg = errorMsg.toLowerCase();
-  
+
   if (msg.includes('user already registered')) {
-    return "כתובת האימייל הזו כבר רשומה במערכת. אנא לחצו על 'התחברות פרופיל קיים'.";
+    return "כתובת האימייל הזו כבר רשומה במערכת. אנא לחץ על 'התחברות פרופיל קיים'.";
   }
   if (msg.includes('invalid login credentials')) {
     return "כתובת האימייל או הסיסמה שהזנתם שגויים. אנא נסו שוב.";
@@ -70,18 +85,15 @@ const getHebrewAuthError = (errorMsg: string) => {
   if (msg.includes('valid email')) {
     return "אנא הזינו כתובת אימייל תקינה.";
   }
-  
+
   return "אירעה שגיאה בתקשורת. אנא ודאו שכל הפרטים נכונים ונסו שוב.";
 };
 
 export default function Home() {
-  // 1. נעילת אתר
-  const [isSiteUnlocked, setIsSiteUnlocked] = useState(false);
-  const [sitePasswordInput, setSitePasswordInput] = useState('');
-
-  // 2. משתמשים
+  // 1. משתמשים
   const [user, setUser] = useState<User | null>(null);
   const [isGuest, setIsGuest] = useState(false);
+  const [isCheckingAccess, setIsCheckingAccess] = useState(true);
   const [isLoginMode, setIsLoginMode] = useState(true); // מעבר בין התחברות להרשמה
   const [fullName, setFullName] = useState(''); // שם
   const [phone, setPhone] = useState('');       // טלפון
@@ -89,13 +101,18 @@ export default function Home() {
   const [authPassword, setAuthPassword] = useState('');
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
 
-  // 3. צ'אט והיסטוריה
+  // 2. צ'אט והיסטוריה
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [mainMessages, setMainMessages] = useState<ChatMessageType[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatRecord[]>([]);
   const [input, setInput] = useState('');
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [studyMode, setStudyMode] = useState(false);
+  const [studyScores, setStudyScores] = useState<number[]>([]);
+  const [studyQuestionMode, setStudyQuestionMode] = useState<'ai' | 'user'>('ai');
 
-  // 4. מודלים (Modals) וזיכרון
+  // 3. מודלים (Modals) וזיכרון
   const [isSideModalOpen, setIsSideModalOpen] = useState(false);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -107,27 +124,53 @@ export default function Home() {
   const [newGlobalRule, setNewGlobalRule] = useState('');
   const [newChatRule, setNewChatRule] = useState('');
 
-  // 5. מצבי AI וחיבור (BYOK + Fallback)
+  // 4. מצבי AI וחיבור (BYOK + Fallback)
   const [isWaiting, setIsWaiting] = useState(false);
   const [countdown, setCountdown] = useState(15);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0]);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_ID);
   const [disabledModels, setDisabledModels] = useState<string[]>([]);
-  const [isFallbackActive, setIsFallbackActive] = useState(false); // האם המודל הפעיל כרגע הוא גיבוי (עקב כשל במודל שנבחר)
-  
-  // 6. ניהול מפתח API נעילה/עריכה ב-DB
-  const [userApiKey, setUserApiKey] = useState('');
-  const [isApiKeyLocked, setIsApiKeyLocked] = useState(false); 
-  const [currentModelName, setCurrentModelName] = useState(AVAILABLE_MODELS[0]);
 
-  // בדיקה אם האורח ניצל את השאלה היחידה שלו
+  // 5. ניהול מפתח API נעילה/עריכה ב-DB
+  const [userApiKey, setUserApiKey] = useState('');
+  const [isApiKeyLocked, setIsApiKeyLocked] = useState(false);
+  const [currentModelName, setCurrentModelName] = useState(DEFAULT_MODEL_ID);
+
+  // 7. מדריך היכרות
+  const [isTourOpen, setIsTourOpen] = useState(false);
+  const [isApiGuideOpen, setIsApiGuideOpen] = useState(false);
+  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+
   const guestLimitReached = isGuest && mainMessages.some(msg => msg.role === 'user');
+
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) return;
+    const previewUrl = URL.createObjectURL(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setPendingImage({ base64: dataUrl.split(',')[1], mimeType: file.type, previewUrl, file });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
 
   // פונקציית עזר לבניית הוראות המערכת המאוחדות
   const getCombinedSystemInstructions = () => {
     const currentDate = new Date().toLocaleDateString('he-IL');
-    let combined = `התאריך היום הוא ${currentDate}.\n`;
+    let combined = `התאריך היום הוא ${currentDate}.
+הנחיות תשובה קבועות:
+- הצג מידע ברור, מדויק ומסודר, והפרד בין עובדות, הסבר ודוגמה כשזה עוזר להבנה.
+- השתמש בכותרות קצרות, רשימות או סמלים רק כאשר הם משפרים את ההבנה.
+- אל תשתמש בסימני # או * או בסמלים דקורטיביים מיותרים. השתמש בהם רק אם המשתמש ביקש אותם או אם הם חלק מהתוכן המבוקש, כגון קוד, מספר טלפון או סימון טכני.
+- אם המשתמש ביקש מכתב, קוד או טקסט להעתקה, הצג אותו נקי ומוכן להעתקה.
+`;
     if (globalRules.length > 0) {
       combined += "הוראות קבועות למערכת (חובה תמיד לציית):\n" + globalRules.map(r => "- " + r.rule_text).join("\n") + "\n\n";
     }
@@ -140,10 +183,54 @@ export default function Home() {
   // --- Effects ---
   useEffect(() => {
     const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) setUser(session.user);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          setUser(session.user);
+        } else {
+          const response = await fetch('/api/guest', { credentials: 'include' });
+          const data = await response.json();
+          if (response.ok && data.isGuest) setIsGuest(true);
+        }
+      } catch {
+        // מצב האורח יישאר כבוי אם לא ניתן לבדוק את ה-cookie.
+      } finally {
+        setIsCheckingAccess(false);
+      }
     };
     checkUser();
+  }, []);
+
+  // פתיחת tour אוטומטית בפעם הראשונה (אחרי שהמשתמש מחובר/אורח)
+  useEffect(() => {
+    if ((user || isGuest) && !localStorage.getItem(TOUR_DONE_KEY)) {
+      // ממתינים frame אחד כדי שה-DOM יהיה מוכן
+      setTimeout(() => setIsTourOpen(true), 400);
+    }
+  }, [user, isGuest]);
+
+  // טעינת רשימת המודלים מה-API
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const res = await fetch('/api/models');
+        if (!res.ok) throw new Error('Failed to fetch models');
+        const data = await res.json();
+        const models: ModelInfo[] = data.models ?? [];
+        setAvailableModels(models);
+        // אם המודל שנבחר לא קיים ברשימה, נאפס לברירת מחדל
+        if (models.length > 0 && !models.find(m => m.id === selectedModel)) {
+          setSelectedModel(models[0].id);
+          setCurrentModelName(models[0].id);
+        }
+      } catch (err) {
+        console.error('שגיאה בטעינת מודלים:', err);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+    fetchModels();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // טעינת כל נתוני המשתמש מה-DB כשהוא מתחבר (כולל מפתח ומודל מועדף)
@@ -178,7 +265,7 @@ export default function Home() {
         setIsApiKeyLocked(false);
       }
     };
-    
+
     fetchUserData();
   }, [user]);
 
@@ -247,13 +334,25 @@ export default function Home() {
 
   const loadSingleChat = async (chatId: string) => {
     setCurrentChatId(chatId);
-    const { data } = await supabase.from('messages').select('role, content').eq('chat_id', chatId).order('created_at', { ascending: true });
+    const { data } = await supabase
+      .from('messages')
+      .select('id, role, content, image_path, image_mime_type')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
     if (data) {
-      const formattedMessages: ChatMessageType[] = (data as DbMessage[]).map((msg) => ({
-        role: msg.role,
-        parts: [{ text: msg.content }]
+      const messages = await Promise.all((data as DbMessage[]).map(async (msg) => {
+        let imageUrl: string | undefined;
+        if (msg.image_path) {
+          const { data: signed } = await supabase.storage.from('chat-images').createSignedUrl(msg.image_path, 60 * 60);
+          imageUrl = signed?.signedUrl;
+        }
+        return {
+          id: msg.id,
+          role: msg.role,
+          parts: [{ ...(imageUrl ? { imageUrl } : {}), text: msg.content }],
+        } as ChatMessageType;
       }));
-      setMainMessages(formattedMessages);
+      setMainMessages(messages);
       setCurrentModelName(selectedModel);
     }
   };
@@ -277,12 +376,14 @@ export default function Home() {
   };
 
   const handleDeleteChat = async (chatId: string) => {
+    const { data: imageMessages } = await supabase.from('messages').select('image_path').eq('chat_id', chatId).not('image_path', 'is', null);
     const { error } = await supabase.from('chats').delete().eq('id', chatId);
+    // CASCADE ב-DB מוחק messages + chat_summaries אוטומטית
     if (!error) {
+      const imagePaths = (imageMessages ?? []).map((message) => message.image_path).filter((path): path is string => Boolean(path));
+      if (imagePaths.length > 0) await supabase.storage.from('chat-images').remove(imagePaths);
       setChatHistory(prev => prev.filter(c => c.id !== chatId));
-      if (currentChatId === chatId) {
-        startNewChat();
-      }
+      if (currentChatId === chatId) startNewChat();
     } else {
       alert("שגיאה במחיקת השיחה");
     }
@@ -297,25 +398,16 @@ export default function Home() {
     }
   };
 
-  // --- פעולות התחברות ---
-  const unlockSite = async () => {
-    const isCorrect = await verifySitePassword(sitePasswordInput);
-    if (isCorrect) {
-      setIsSiteUnlocked(true);
-    } else {
-      alert("סיסמת אתר שגויה");
-    }
-  };
-
+  // --- Authentication ---
   const handleLogin = async () => {
     if (!email || !authPassword) {
       alert("אנא מלאו אימייל וסיסמה.");
       return;
     }
-    
+
     setIsLoadingAuth(true);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
-    
+
     if (error) {
       alert(getHebrewAuthError(error.message));
     } else {
@@ -331,8 +423,8 @@ export default function Home() {
     }
 
     setIsLoadingAuth(true);
-    const { data, error } = await supabase.auth.signUp({ 
-      email, 
+    const { data, error } = await supabase.auth.signUp({
+      email,
       password: authPassword,
       options: {
         data: {
@@ -341,7 +433,7 @@ export default function Home() {
         }
       }
     });
-    
+
     if (error) {
       alert(getHebrewAuthError(error.message));
     } else {
@@ -355,9 +447,31 @@ export default function Home() {
     setIsLoadingAuth(false);
   };
 
+  const clearGuestSession = async () => {
+    try {
+      await fetch('/api/guest', { method: 'DELETE', credentials: 'include' });
+    } catch {
+      // מותר להמשיך גם אם מחיקת ה-cookie נכשלה; המצב האורח יוסר מקומית.
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    setIsGuest(false);
+    if (isGuest) {
+      await clearGuestSession();
+    }
+    setMainMessages([]);
+    setCurrentChatId(null);
+    setCurrentModelName(availableModels[0]?.id ?? DEFAULT_MODEL_ID);
+    setStudyMode(false);
+    setStudyScores([]);
+    setStudyQuestionMode('ai');
+  };
+
+  const leaveGuestMode = async () => {
+    await clearGuestSession();
     setIsGuest(false);
     setMainMessages([]);
     setCurrentChatId(null);
@@ -373,7 +487,6 @@ export default function Home() {
     setIsFallbackActive(false);
   };
 
-  // מעתיק את כתובת המייל ללוח - גיבוי למקרה שאין אפליקציית מייל מוגדרת כברירת מחדל
   const handleCopySupportEmail = async () => {
     try {
       await navigator.clipboard.writeText(SUPPORT_EMAIL);
@@ -392,7 +505,7 @@ export default function Home() {
 
     const { error } = await supabase
       .from('profiles')
-      .update({ 
+      .update({
         api_key: userApiKey.trim(),
         preferred_model: selectedModel
       })
@@ -404,7 +517,7 @@ export default function Home() {
     } else {
       alert("ההגדרות נשמרו בחשבונך בהצלחה!");
       if (userApiKey.trim() !== '') {
-        setIsApiKeyLocked(true); 
+        setIsApiKeyLocked(true);
       } else {
         setIsApiKeyLocked(false);
       }
@@ -412,20 +525,47 @@ export default function Home() {
     }
   };
 
-  // --- שליחת הודעה בצ'אט הראשי ---
+  const enterAsGuest = async () => {
+    try {
+      const response = await fetch('/api/guest', { method: 'POST', credentials: 'include' });
+      const data = await response.json().catch(() => null);
+      if (response.ok) {
+        setIsGuest(true);
+        return;
+      }
+      alert(data?.error || 'לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
+    } catch {
+      alert('לא ניתן להפעיל מצב אורח כרגע. נסו שוב מאוחר יותר.');
+    }
+  };
+
+  // --- Chat ---
   const handleMainSend = async () => {
     if (guestLimitReached) {
       alert("אורחים יכולים לשאול רק שאלה אחת. כדי להמשיך, אנא התחברו או צרו פרופיל חדש 💙");
       return;
     }
 
-    if (!input.trim() || isWaiting) return;
+    if (!input.trim()) return;
+    if (isWaiting) return;
+    if (!userApiKey.trim()) {
+      setIsApiGuideOpen(true);
+    }
 
     const userText = input;
-    const userMessage: ChatMessageType = { role: 'user', parts: [{ text: userText }] };
+    const imageSnapshot = pendingImage;
+
+    const userMessage: ChatMessageType = {
+      role: 'user',
+      parts: [
+        ...(imageSnapshot ? [{ imageUrl: imageSnapshot.previewUrl, inlineData: { mimeType: imageSnapshot.mimeType, data: imageSnapshot.base64 } }] : []),
+        { text: userText },
+      ],
+    };
 
     setMainMessages(prev => [...prev, userMessage]);
     setInput('');
+    setPendingImage(null);
     setIsWaiting(true);
     setCountdown(15);
 
@@ -434,12 +574,32 @@ export default function Home() {
       if (user) {
         activeChatId = await ensureChatExists(userText);
         if (activeChatId) {
-          await supabase.from('messages').insert([{ chat_id: activeChatId, role: 'user', content: userText }]);
+          let imagePath: string | null = null;
+          if (imageSnapshot) {
+            const extension = imageSnapshot.file.name.split('.').pop()?.toLowerCase() || 'jpg';
+            imagePath = `${user.id}/${activeChatId}/${crypto.randomUUID()}.${extension}`;
+            const { error: uploadError } = await supabase.storage
+              .from('chat-images')
+              .upload(imagePath, imageSnapshot.file, { contentType: imageSnapshot.mimeType, upsert: false });
+            if (uploadError) throw new Error('לא הצלחנו לשמור את התמונה. נסו שוב.');
+          }
+          const { data: savedUserMessage } = await supabase
+            .from('messages')
+            .insert([{ chat_id: activeChatId, role: 'user', content: userText, image_path: imagePath, image_mime_type: imageSnapshot?.mimeType ?? null }])
+            .select('id')
+            .single();
+          if (savedUserMessage) {
+            setMainMessages(prev => prev.map((message, index) =>
+              index === prev.length - 1 ? { ...message, id: savedUserMessage.id } : message
+            ));
+          }
         }
       }
 
       const combinedSystemInstructions = getCombinedSystemInstructions();
-      const fallbackModels = AVAILABLE_MODELS.filter(m => m !== selectedModel && !disabledModels.includes(m));
+      const fallbackModels = availableModels
+        .map(m => m.id)
+        .filter(m => m !== selectedModel && !disabledModels.includes(m));
 
       const response: GeminiResponse = await askGemini(
         userText,
@@ -447,14 +607,40 @@ export default function Home() {
         combinedSystemInstructions,
         selectedModel,
         fallbackModels,
-        userApiKey
+        userApiKey,
+        isGuest,
+        imageSnapshot?.base64,
+        imageSnapshot?.mimeType,
+        studyMode,
+        studyQuestionMode,
       );
 
-      const modelMessage: ChatMessageType = { role: 'model', parts: [{ text: response.text }] };
+      // בניית חלקי התשובה הטקסטואליים
+      const modelParts: ChatMessageType['parts'] = [];
+      if (response.text?.trim()) modelParts.push({ text: response.text });
+
+      const modelMessage: ChatMessageType = {
+        role: 'model',
+        parts: modelParts.length > 0 ? modelParts : [{ text: response.text }],
+        studyScore: studyMode ? response.studyScore : undefined,
+      };
       setMainMessages(prev => [...prev, modelMessage]);
+      setEditingMessageId(null);
+      if (studyMode && typeof response.studyScore === 'number') {
+        setStudyScores(prev => [...prev, response.studyScore as number]);
+      }
 
       if (user && activeChatId) {
-        await supabase.from('messages').insert([{ chat_id: activeChatId, role: 'model', content: response.text }]);
+        const { data: savedModelMessage } = await supabase
+          .from('messages')
+          .insert([{ chat_id: activeChatId, role: 'model', content: response.text }])
+          .select('id')
+          .single();
+        if (savedModelMessage) {
+          setMainMessages(prev => prev.map((message, index) =>
+            index === prev.length - 1 ? { ...message, id: savedModelMessage.id } : message
+          ));
+        }
       }
 
       if (response.modelUsed !== selectedModel) {
@@ -476,7 +662,6 @@ export default function Home() {
 
     } catch (error: unknown) {
       console.error("שגיאה בצ'אט הראשי:", error);
-
       if (error instanceof ChatApiError) {
         alert(error.message);
         if (error.failedModels.length > 0) {
@@ -496,106 +681,81 @@ export default function Home() {
 
   // --- רינדור מסכים ---
 
-  if (!isSiteUnlocked) {
-    return (
-      <div dir="rtl" className="flex h-[100dvh] items-center justify-center bg-[#efeae2]">
-        <div className="p-8 bg-white rounded-2xl shadow-xl w-full max-w-sm border border-gray-200">
-          <div className="w-16 h-16 bg-[#ec4899] rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-sm">🔒</div>
-          <h1 className="text-xl font-bold text-gray-800 mb-6 text-center">כניסה למערכת המשפחתית</h1>
-          <input
-            type="password"
-            className="w-full p-3 border border-gray-300 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-center"
-            placeholder="הזיני סיסמת אתר..."
-            value={sitePasswordInput}
-            onChange={(e) => setSitePasswordInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && unlockSite()}
-          />
-          <button onClick={unlockSite} className="w-full bg-[#ec4899] text-white py-3 rounded-xl font-bold hover:bg-[#db2777] transition-all">כניסה</button>
-        </div>
-      </div>
-    );
-  }
-
   // --- רינדור מסך התחברות / הרשמה ---
+  if (isCheckingAccess) return null;
+
   if (!user && !isGuest) {
     return (
-      <div dir="rtl" className="flex h-[100dvh] items-center justify-center bg-[#efeae2]">
-        <div className="p-8 bg-white rounded-2xl shadow-xl w-full max-w-sm border border-gray-200">
-          <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-sm text-white">👤</div>
-          <h1 className="text-xl font-bold text-gray-800 mb-6 text-center">
-            {isLoginMode ? 'ברוכים השבים' : 'יצירת משתמש חדש'}
-          </h1>
-          
-          {!isLoginMode && (
-            <>
-              <input
-                type="text"
-                placeholder="שם מלא (חובה)"
-                className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-right"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-              />
-              <input
-                type="tel"
-                placeholder="מספר טלפון (חובה)"
-                className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-right"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-            </>
-          )}
+      <div dir="rtl" className="flex min-h-[100dvh] items-center justify-center px-3 py-6 sm:px-4 bg-gradient-to-br from-slate-50 via-violet-50/40 to-blue-50/40">
 
-          <input
-            type="email"
-            placeholder="אימייל (אישי)"
-            className="w-full p-3 border border-gray-300 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-right"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            type="password"
-            placeholder="סיסמה (לפחות 6 תווים)"
-            className="w-full p-3 border border-gray-300 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-right"
-            value={authPassword}
-            onChange={(e) => setAuthPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                isLoginMode ? handleLogin() : handleSignUp();
-              }
-            }}
-          />
-
-          {isLoginMode && (
-            <div className="text-left mb-6">
-              <a href="/forgot-password" className="text-sm text-pink-600 hover:underline">שכחת סיסמה?</a>
+        <div className="w-full max-w-md sm:max-w-sm">
+          {/* לוגו + כותרת */}
+          <div className="text-center mb-6 sm:mb-8">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center text-3xl shadow-lg shadow-violet-200 rotate-3"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #2563eb)' }}>
+              🤖
             </div>
-          )}
+            <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">
+              {isLoginMode ? 'ברוכים השבים' : 'הצטרפות'}
+            </h1>
+            <p className="text-sm text-slate-400 mt-1">AI Workspace · Gemini</p>
+          </div>
 
-          {isLoginMode ? (
-            <button onClick={handleLogin} disabled={isLoadingAuth} className="w-full bg-[#ec4899] text-white py-3 rounded-xl font-bold hover:bg-[#db2777] mb-3 transition-all disabled:opacity-50">
-              התחברות פרופיל קיים
-            </button>
-          ) : (
-            <button onClick={handleSignUp} disabled={isLoadingAuth} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-700 mb-3 transition-all disabled:opacity-50">
-              יצירת פרופיל חדש
-            </button>
-          )}
-          
-          <div className="text-center mt-2 mb-4">
-            <button 
-              onClick={() => setIsLoginMode(!isLoginMode)} 
-              className="text-sm text-gray-500 hover:text-gray-800 underline"
+          {/* כרטיס */}
+          <div className="rainbow-border bg-white rounded-3xl shadow-xl shadow-violet-100/50 border border-slate-100 p-5 sm:p-8">
+            <div className="space-y-3">
+              {!isLoginMode && (
+                <>
+                  <input type="text" placeholder="שם מלא"
+                    className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                    value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                  <input type="tel" placeholder="טלפון"
+                    className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                    value={phone} onChange={(e) => setPhone(e.target.value)} />
+                </>
+              )}
+              <input type="email" placeholder="אימייל"
+                className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input type="password" placeholder="סיסמה (6+ תווים)"
+                className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-right focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400 focus:bg-white transition-all"
+                value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { isLoginMode ? handleLogin() : handleSignUp(); } }} />
+            </div>
+
+            {isLoginMode && (
+              <div className="text-left mt-2">
+                <a href="/forgot-password" className="text-xs text-violet-500 hover:text-violet-700 transition-colors">שכחת סיסמה?</a>
+              </div>
+            )}
+
+            <button
+              onClick={isLoginMode ? handleLogin : handleSignUp}
+              disabled={isLoadingAuth}
+              className="w-full mt-6 py-4 rounded-2xl font-bold text-white text-sm transition-all duration-300 disabled:opacity-40 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-violet-300/50"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #2563eb)' }}
             >
-              {isLoginMode ? 'אין לך חשבון? לחץ כאן להרשמה' : 'יש לך כבר חשבון? התחבר כאן'}
+              {isLoadingAuth ? '...' : isLoginMode ? 'כניסה לחשבון' : 'יצירת חשבון'}
+            </button>
+
+            <div className="text-center mt-4">
+              <button onClick={() => setIsLoginMode(!isLoginMode)}
+                className="text-xs text-slate-400 hover:text-slate-700 transition-colors">
+                {isLoginMode ? 'אין חשבון? הירשם כאן' : 'יש חשבון? התחבר'}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-slate-100" />
+              <span className="text-slate-300 text-xs">או</span>
+              <div className="flex-1 h-px bg-slate-100" />
+            </div>
+
+            <button onClick={enterAsGuest}
+              className="w-full py-3.5 rounded-2xl font-semibold text-slate-500 border border-slate-200 bg-slate-50 hover:bg-slate-100 hover:text-slate-800 transition-all duration-200 text-sm">
+              המשך כאורח — שאלה אחת
             </button>
           </div>
-
-          <div className="relative flex py-2 items-center mb-4 mt-2">
-            <div className="flex-grow border-t border-gray-200"></div>
-            <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">או</span>
-            <div className="flex-grow border-t border-gray-200"></div>
-          </div>
-          <button onClick={() => setIsGuest(true)} className="w-full bg-transparent border-2 border-pink-300 text-pink-600 py-3 rounded-xl font-bold hover:bg-pink-50 transition-all">המשך כאורח (ללא היסטוריה)</button>
         </div>
       </div>
     );
@@ -603,81 +763,130 @@ export default function Home() {
 
   // --- המסך הראשי ---
   return (
-    <div dir="rtl" className="flex h-[100dvh] overflow-hidden bg-[#efeae2] relative">
+    <div dir="rtl" className="rainbow-border flex h-[100dvh] overflow-hidden text-slate-800 relative font-sans"
+      style={{ background: 'linear-gradient(160deg, #f0f4ff 0%, #faf5ff 50%, #eff6ff 100%)' }}>
 
       {/* תפריט צד (Sidebar) */}
-    <Sidebar 
-  user={user}
-  chatHistory={chatHistory}
-  currentChatId={currentChatId}
-  onSelectChat={loadSingleChat}
-  onStartNewChat={startNewChat}
-  onLogout={handleLogout}
-  onDeleteChat={handleDeleteChat}
-  onUpdateTitle={handleUpdateChatTitle}
-  mainMessages={mainMessages}
-  userApiKey={userApiKey}
-/>
+      <div data-tour-id="tour-sidebar">
+        <Sidebar
+          user={user}
+          chatHistory={chatHistory}
+          currentChatId={currentChatId}
+          onSelectChat={loadSingleChat}
+          onStartNewChat={startNewChat}
+          onLogout={handleLogout}
+          onDeleteChat={handleDeleteChat}
+          onUpdateTitle={handleUpdateChatTitle}
+          onOpenSummary={() => setIsSummaryOpen(true)}
+          mainMessages={mainMessages}
+          userApiKey={userApiKey}
+        />
+      </div>
 
       {/* אזור התוכן המרכזי */}
-      <main className="flex-1 flex flex-col relative h-full overflow-hidden">
-        <header className="bg-[#f0f2f5] p-4 shadow-sm z-10 flex justify-between items-center border-b border-gray-200 shrink-0">
-          <div>
-            <h1 className="text-xl font-bold text-gray-800">AI Workspace</h1>
-            {user && <span className="text-xs text-gray-500">{user.email}</span>}
+      <main className="flex-1 flex flex-col relative h-full overflow-hidden bg-white/70 backdrop-blur-sm">
+
+        {/* האדר */}
+        <header className="rainbow-border bg-white/80 backdrop-blur-xl text-slate-800 p-3 sm:p-4 z-20 flex flex-col gap-3 border-b border-violet-100/60 shrink-0 shadow-[0_2px_20px_rgba(124,58,237,0.06)] relative md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-xl font-extrabold tracking-tight"
+              style={{ background: 'linear-gradient(90deg, #7c3aed, #2563eb)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              AI Workspace
+            </h1>
+            {user && <span className="block text-[11px] font-medium text-slate-400 tracking-wide truncate">{user.email}</span>}
           </div>
-          <div className="flex gap-2">
+          
+          <div className="flex w-full flex-wrap justify-end gap-2 md:max-w-3xl">
+            {isGuest && (
+              <button
+                onClick={leaveGuestMode}
+                className="bg-white border border-violet-200 text-violet-700 px-3 py-2 rounded-xl hover:bg-violet-50 hover:border-violet-300 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
+                title="חזרה למסך הכניסה"
+              >
+                <span>🔐</span> התחברות
+              </button>
+            )}
+            {/* כפתור תדריך — תמיד גלוי, מאפשר הפעלה מחדש */}
+            <button
+              onClick={() => { localStorage.removeItem(TOUR_DONE_KEY); setIsTourOpen(true); }}
+              className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
+              title="הצגת מדריך היכרות"
+            >
+              <span>🗺️</span> תדריך
+            </button>
             <button
               onClick={() => setIsSupportModalOpen(true)}
-              className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm"
+              className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
               title="לשלוח שאלה, רעיון או דיווח על בעיה"
             >
-              <span className="text-lg">✉️</span> תמיכה
+              <span>✉️</span> תמיכה
             </button>
             <Link
               href="/about"
-              className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm"
+              className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow"
               title="על הפיתוח - למה ומה קיים באתר"
             >
-              <span className="text-lg">ℹ️</span> אודות
+              <span>ℹ️</span> אודות
             </Link>
-            <button onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm">
-              <span className="text-lg">⚙️</span> הגדרות AI
+            <button data-tour-id="tour-btn-settings" onClick={() => setIsSettingsModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+              <span>⚙️</span> הגדרות
             </button>
             {user && (
-              <button onClick={() => setIsMemoryModalOpen(true)} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm">
-                <span className="text-lg">🧠</span> כללים וזיכרון
+              <button data-tour-id="tour-btn-rules" onClick={() => setIsMemoryModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+                <span>🧠</span> כללים
               </button>
             )}
-            <button onClick={() => setIsSideModalOpen(true)} className="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-600 font-medium transition-all shadow-sm flex items-center gap-2 text-sm">
-              <span className="text-lg">💡</span> התייעצות
+            <button data-tour-id="tour-btn-consult" onClick={() => setIsSideModalOpen(true)} className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 font-medium transition-all duration-300 flex items-center gap-1.5 text-xs shadow-sm hover:shadow">
+              <span>💡</span> התייעצות
             </button>
           </div>
         </header>
 
         {toastMessage && (
-          <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-50 animate-fade-in">
-            <div className="bg-slate-800 text-white px-6 py-3 rounded-full shadow-lg text-sm font-medium border border-slate-700">{toastMessage}</div>
+          <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-50 animate-fade-in">
+            <div className="bg-gradient-to-r from-violet-700 to-blue-700 text-white px-6 py-3 rounded-full shadow-2xl text-sm font-medium border border-violet-500/30 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-300 animate-pulse"></span>
+              {toastMessage}
+            </div>
           </div>
         )}
 
-        {/* אזור ההודעות הנגלל */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8">
-          <div className="max-w-3xl mx-auto">
+        {/* אזור ההודעות הנגלל - מעבר צבע עדין ברקע */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-gradient-to-b from-violet-50/30 via-white/60 to-blue-50/20 relative scroll-smooth">
+          <div className="max-w-3xl mx-auto w-full">
             {mainMessages.length === 0 ? (
-              <div className="text-center mt-20 text-gray-400">
-                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-2xl shadow-sm">👋</div>
-                <p className="text-xl font-medium text-gray-600 mb-1">איך אפשר לעזור היום?</p>
+              <div className="text-center mt-32 text-slate-400 animate-fade-in">
+                <div className="w-20 h-20 bg-white/50 backdrop-blur-sm border border-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-6 text-4xl shadow-xl shadow-slate-200/50 transform -rotate-3 hover:rotate-0 transition-all duration-500">👋</div>
+                <p className="text-2xl font-bold text-slate-700 mb-2 tracking-tight">איך אפשר לעזור היום?</p>
+                <p className="text-sm text-slate-500">בחרו מודל, הקלידו שאלה, ובואו נתחיל.</p>
               </div>
             ) : (
-              mainMessages.map((msg, index) => <ChatMessage key={index} message={msg} />)
+              mainMessages.map((msg, index) => (
+                <div className="animate-fade-in-up" style={{ animationDelay: `${Math.min(index * 50, 300)}ms` }} key={msg.id || index}>
+                  <ChatMessage
+                    message={msg}
+                    onEdit={msg.role === 'user' && index === mainMessages.findLastIndex((item) => item.role === 'user') ? () => editLastPrompt(msg) : undefined}
+                  />
+                </div>
+              ))
             )}
 
             {isWaiting && (
-              <div className="flex w-full mb-4 justify-start animate-fade-in">
-                <div className="bg-white border border-gray-200 text-gray-600 rounded-2xl rounded-tr-none p-3 px-5 text-sm shadow-sm flex items-center gap-3">
-                  <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-[#ec4899] rounded-full"></div>
-                  <span>ממתין לתשובה... {countdown > 0 ? `(${countdown} שניות)` : '(מעבד...)'}</span>
+              <div className="flex w-full mb-6 justify-start animate-fade-in">
+                <div className="relative rounded-2xl rounded-tr-sm p-[2px] overflow-hidden max-w-[80%] shadow-lg shadow-violet-200/50">
+                  {/* פס גרדיאנט מונפש סביב הבועה */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-violet-500 via-blue-500 via-teal-400 to-violet-500 animate-thinking-flow rounded-2xl rounded-tr-sm" />
+                  <div className="relative bg-white rounded-[calc(1rem-2px)] rounded-tr-[calc(0.125rem-2px)] px-6 py-4 flex items-center gap-4 text-sm">
+                    {/* נקודות קפיצה */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-violet-500 dot-1 inline-block" />
+                      <span className="w-2 h-2 rounded-full bg-blue-500  dot-2 inline-block" />
+                      <span className="w-2 h-2 rounded-full bg-teal-500  dot-3 inline-block" />
+                    </div>
+                    <span className="font-medium text-slate-600">
+                      חושב... {countdown > 0 ? <span className="text-slate-400 text-xs">({countdown}ש׳)</span> : null}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -685,31 +894,72 @@ export default function Home() {
         </div>
 
         {/* סרגל הקלדה */}
-        <div className="bg-[#f0f2f5] p-3 md:p-4 border-t border-gray-200 shrink-0 flex flex-col items-center">
-          <div className="w-full max-w-3xl flex gap-3 mb-2">
-            <input
-              className="flex-1 p-3 bg-white border-none rounded-xl focus:outline-none focus:ring-1 focus:ring-pink-300 shadow-sm text-base disabled:opacity-50 disabled:bg-gray-100"
+        <div className="rainbow-border bg-white/90 backdrop-blur-lg border-t border-slate-200 p-3 sm:p-4 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-20 relative">
+          
+          <div className="w-full max-w-3xl flex flex-col gap-3 mb-3 relative sm:flex-row sm:items-end">
+            {pendingImage && (
+              <div className="absolute bottom-full right-0 mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={pendingImage.previewUrl} alt="תמונה שנבחרה" className="h-12 w-12 rounded-lg object-cover" />
+                <button onClick={() => { URL.revokeObjectURL(pendingImage.previewUrl); setPendingImage(null); }} className="text-xs font-bold text-slate-400 hover:text-red-500" aria-label="הסרת תמונה">✕</button>
+              </div>
+            )}
+            <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleImageSelect} />
+            <button
+              onClick={() => imageInputRef.current?.click()}
+              disabled={isWaiting || guestLimitReached}
+              title="העלאת תמונה לניתוח ב-Gemini"
+              aria-label="העלאת תמונה לניתוח ב-Gemini"
+              className="h-[52px] w-[52px] shrink-0 rounded-2xl border border-slate-200 bg-slate-50 text-xl text-slate-500 transition-all hover:border-teal-300 hover:bg-teal-50 hover:text-teal-600 disabled:opacity-40 sm:h-[56px] sm:w-[56px]"
+            >
+              🖼️
+            </button>
+            <textarea
+              rows={1}
+              className="flex-1 min-h-[52px] max-h-40 resize-y p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:bg-white focus:ring-4 focus:ring-teal-500/15 focus:border-teal-400 shadow-inner text-base transition-all duration-300 disabled:opacity-50 disabled:bg-slate-100 leading-relaxed sm:min-h-[56px]"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleMainSend()}
-              placeholder={guestLimitReached ? "הגעת למגבלת השאלות לאורח 🔒" : "הקלידי הודעה..."}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleMainSend();
+                }
+              }}
+              placeholder={
+                guestLimitReached ? "הגעת למגבלת השאלות לאורח 🔒"
+                : "מה נרצה לדעת היום?..."
+              }
               disabled={isWaiting || guestLimitReached}
             />
             <button
               onClick={handleMainSend}
-              disabled={isWaiting || guestLimitReached}
-              className="bg-[#ec4899] text-white px-8 rounded-xl hover:bg-[#db2777] font-bold transition-colors shadow-sm disabled:bg-gray-400"
+              disabled={isWaiting || guestLimitReached || !input.trim()}
+              data-tour-id="tour-send-btn"
+              className="h-[52px] w-full bg-slate-800 text-white px-6 rounded-2xl hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 font-bold transition-all duration-300 shadow-md disabled:bg-slate-300 disabled:text-slate-500 disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2 group sm:h-[56px] sm:w-auto sm:px-8"
             >
-              שלח
+              <span>שלח</span>
+              <span className="group-hover:translate-x-1 transition-transform rtl:group-hover:-translate-x-1">←</span>
             </button>
           </div>
           <div className="w-full max-w-3xl text-xs text-gray-400 text-right px-2 flex justify-between">
             <span>מודל פעיל כעת: <span className="font-medium text-gray-500">{getModelLabel(currentModelName)}{isFallbackActive ? ' (גיבוי)' : ''}</span></span>
             {isGuest && <span className="text-amber-600 font-medium">{guestLimitReached ? "נגמרו השאלות לאורח" : "שאלה 1 מתוך 1"}</span>}
           </div>
+          
+          {editingMessageId && (
+            <div className="w-full max-w-3xl flex justify-between items-center text-xs text-amber-600 bg-amber-50 rounded-lg px-4 py-2 mt-3 border border-amber-100">
+              <span className="flex items-center gap-2"><span>✏️</span> עורכים את השאלה האחרונה</span>
+              <button onClick={() => { setEditingMessageId(null); setInput(''); }} className="font-bold hover:underline">ביטול עריכה</button>
+            </div>
+          )}
         </div>
 
         {/* מודלים קופצים (Modals) */}
+        <ApiKeyGuide
+          isOpen={isApiGuideOpen}
+          onClose={() => setIsApiGuideOpen(false)}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
+        />
         <SideModal
           isOpen={isSideModalOpen}
           onClose={() => setIsSideModalOpen(false)}
@@ -719,59 +969,73 @@ export default function Home() {
           systemInstruction={getCombinedSystemInstructions()}
         />
 
-        {isSupportModalOpen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
-              <div className="flex justify-between items-center mb-5 border-b pb-4">
-                <h2 className="text-xl font-bold flex items-center gap-2">✉️ תמיכה</h2>
-                <button onClick={() => setIsSupportModalOpen(false)} className="text-gray-500 hover:bg-gray-100 rounded-full w-8 h-8">✕</button>
-              </div>
+        {user && currentChatId && (
+          <ChatSummaryPanel
+            key={currentChatId}
+            isOpen={isSummaryOpen}
+            onClose={() => setIsSummaryOpen(false)}
+            chatId={currentChatId}
+            chatTitle={chatHistory.find((chat) => chat.id === currentChatId)?.title || 'שיחה'}
+            messages={mainMessages}
+            userApiKey={userApiKey}
+          />
+        )}
 
-              <p className="text-sm text-gray-600 mb-4">
-                יש לך שאלה, רעיון, או נתקלת בבעיה? אפשר לפנות בכתובת הבאה:
+        {/* חלון תמיכה */}
+        {isSupportModalOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-fade-in border border-slate-100">
+              <div className="flex justify-between items-center mb-6">
+                <div className="w-12 h-12 bg-teal-50 rounded-2xl flex items-center justify-center text-2xl text-teal-600 mb-2">✉️</div>
+                <button onClick={() => setIsSupportModalOpen(false)} className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full w-10 h-10 flex items-center justify-center transition-colors">✕</button>
+              </div>
+              
+              <h2 className="text-2xl font-bold text-slate-800 mb-3">דברו איתנו</h2>
+              <p className="text-slate-500 mb-6 leading-relaxed">
+                יש לך שאלה, רעיון לשדרוג, או נתקלת בבעיה? נשמח לשמוע ממך בכתובת הבאה:
               </p>
 
-              <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
-                <span dir="ltr" className="flex-1 text-sm font-medium text-gray-800 truncate">
+              <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-6 shadow-inner">
+                <span dir="ltr" className="flex-1 text-[15px] font-bold text-slate-700 truncate tracking-wide">
                   {SUPPORT_EMAIL}
                 </span>
                 <button
                   onClick={handleCopySupportEmail}
-                  className="shrink-0 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded-lg font-medium transition-colors"
+                  className="shrink-0 text-sm bg-white border border-slate-200 hover:border-teal-300 hover:text-teal-700 text-slate-600 px-4 py-2 rounded-xl font-bold transition-all shadow-sm"
                 >
                   {supportCopied ? '✓ הועתק' : 'העתק'}
                 </button>
               </div>
 
-              {/* קישור mailto כאפשרות נוספת - עובד רק אם יש אפליקציית מייל מוגדרת כברירת מחדל */}
               <a
                 href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('פנייה מתוך AI Workspace')}&body=${encodeURIComponent('שלום,\n\nיש לי שאלה / רעיון / בעיה בנוגע לאתר:\n')}`}
-                className="w-full block text-center bg-[#ec4899] text-white py-2.5 rounded-xl font-bold hover:bg-[#db2777] transition-all text-sm"
+                className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"
               >
                 פתיחה באפליקציית מייל
               </a>
-              <p className="text-xs text-gray-400 mt-3 text-center">
-                אם הכפתור לא פותח מייל אצלך, פשוט העתיקי את הכתובת ושלחי אליה הודעה מכל אפליקציית מייל.
-              </p>
             </div>
           </div>
         )}
 
+        {/* חלון הגדרות */}
         {isSettingsModalOpen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
-              <div className="flex justify-between items-center mb-6 border-b pb-4">
-                <h2 className="text-xl font-bold flex items-center gap-2">⚙️ הגדרות AI</h2>
-                <button onClick={() => setIsSettingsModalOpen(false)} className="text-gray-500 hover:bg-gray-100 rounded-full w-8 h-8">✕</button>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 animate-fade-in border border-slate-100">
+              <div className="flex justify-between items-center mb-6">
+                <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-2xl text-indigo-600 mb-2">⚙️</div>
+                <button onClick={() => setIsSettingsModalOpen(false)} className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full w-10 h-10 flex items-center justify-center transition-colors">✕</button>
               </div>
+              
+              <h2 className="text-2xl font-bold text-slate-800 mb-6">הגדרות אישיות</h2>
 
-              <div className="space-y-5">
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">בחירת מודל:</label>
+              <div className="space-y-6">
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                  <label className="block text-sm font-bold text-slate-700 mb-3">בחירת מודל ברירת מחדל:</label>
                   <select
-                    className="w-full border border-gray-300 rounded-lg p-3 bg-gray-50 focus:ring-2 focus:ring-[#ec4899] outline-none"
+                    className="w-full border border-slate-200 rounded-xl p-3.5 bg-white focus:ring-2 focus:ring-indigo-500/30 outline-none font-medium text-slate-700 shadow-sm"
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
+                    disabled={modelsLoading}
                   >
                     {AVAILABLE_MODELS.map(model => (
                       <option key={model} value={model} disabled={disabledModels.includes(model)}>
@@ -781,39 +1045,45 @@ export default function Home() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">מפתח API אישי (BYOK):</label>
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                  <label className="block text-sm font-bold text-slate-700 mb-3">מפתח API אישי (BYOK):</label>
                   <div className="flex gap-2">
                     <input
                       type={isApiKeyLocked ? "password" : "text"}
-                      placeholder="השאר/י ריק כדי להשתמש במפתח של האתר"
-                      className="flex-1 border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-[#ec4899] outline-none text-left disabled:bg-gray-100 disabled:text-gray-500 transition-colors"
+                      placeholder="השאר/י ריק כדי להשתמש במפתח האתר"
+                      className="flex-1 border border-slate-200 rounded-xl p-3.5 bg-white focus:ring-2 focus:ring-indigo-500/30 outline-none text-left disabled:bg-slate-100 disabled:text-slate-400 transition-all shadow-sm font-mono text-sm"
                       dir="ltr"
                       value={isApiKeyLocked && userApiKey ? '••••••••••••••••••••••••••••' : userApiKey}
                       onChange={(e) => setUserApiKey(e.target.value)}
                       disabled={isApiKeyLocked}
                     />
-                    
+
                     {isApiKeyLocked && (
-                      <button 
-                        onClick={() => setIsApiKeyLocked(false)} 
-                        className="bg-gray-200 text-gray-700 px-4 rounded-lg font-bold hover:bg-gray-300 transition-colors"
+                      <button
+                        onClick={() => setIsApiKeyLocked(false)}
+                        className="bg-white border border-slate-200 text-slate-600 px-5 rounded-xl font-bold hover:border-indigo-300 hover:text-indigo-600 transition-colors shadow-sm"
                       >
-                        ערוך
+                        עריכה
                       </button>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">
-                    המפתח נשמר בצורה מאובטחת בחשבון שלך וישמש אותך בכל מחשב שממנו תתחברי.
+                  <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                    המפתח נשמר בצורה מאובטחת בחשבון שלך וישמש אותך בכל מחשב שממנו תתחברי. מומלץ למשתמשים כבדים.
                   </p>
-                </div>
-                
-                <div className="pt-4 border-t border-gray-100">
-                  <button 
-                    onClick={handleSaveUserSettings} 
-                    className="w-full bg-[#ec4899] text-white py-3 rounded-xl font-bold hover:bg-[#db2777] transition-all"
+                  <button
+                    onClick={() => setIsApiGuideOpen(true)}
+                    className="mt-3 text-xs font-bold text-teal-700 hover:text-teal-800 hover:underline"
                   >
-                    שמור הגדרות לחשבון
+                    איך משיגים מפתח מ־Google AI Studio?
+                  </button>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    onClick={handleSaveUserSettings}
+                    className="w-full bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-slate-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300"
+                  >
+                    שמירת שינויים
                   </button>
                 </div>
               </div>
@@ -821,64 +1091,81 @@ export default function Home() {
           </div>
         )}
 
+        {/* חלון כללים (זיכרון) */}
         {isMemoryModalOpen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-fade-in">
-              <header className="p-4 border-b flex justify-between items-center bg-gray-50">
-                <h2 className="text-xl font-bold flex items-center gap-2"><span className="text-2xl">🧠</span> ניהול זיכרון וכללים</h2>
-                <button onClick={() => setIsMemoryModalOpen(false)} className="text-gray-500 hover:text-gray-800 bg-gray-200 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-fade-in border border-slate-100">
+              <header className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center text-xl">🧠</div>
+                  <h2 className="text-xl font-bold text-slate-800">ניהול זיכרון וכללים</h2>
+                </div>
+                <button onClick={() => setIsMemoryModalOpen(false)} className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full w-10 h-10 flex items-center justify-center transition-colors">✕</button>
               </header>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              <div className="flex-1 overflow-y-auto p-8 space-y-10 scroll-smooth">
                 <section>
-                  <h3 className="font-bold text-gray-800 mb-2 border-b pb-2">כללים תמידיים (חלים על כל השיחות)</h3>
-                  <div className="space-y-2 mb-4">
+                  <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
+                    <h3 className="font-bold text-slate-800 text-lg">כללים תמידיים</h3>
+                    <span className="text-xs font-medium bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">לכל השיחות</span>
+                  </div>
+                  <div className="space-y-3 mb-5">
                     {globalRules.length === 0 ? (
-                      <p className="text-sm text-gray-500 italic">אין כללים קבועים עדיין.</p>
+                      <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center">
+                        <p className="text-sm text-slate-400 font-medium">אין כללים קבועים עדיין. אפשר לכתוב למשל "תמיד תענה לי בקצרה ולעניין".</p>
+                      </div>
                     ) : (
                       globalRules.map(rule => (
-                        <div key={rule.id} className="flex justify-between items-start bg-blue-50 p-3 rounded-lg text-sm text-blue-900 border border-blue-100">
-                          <span className="whitespace-pre-wrap flex-1">{rule.rule_text}</span>
-                          <button onClick={() => deleteGlobalRule(rule.id)} className="text-red-500 hover:text-red-700 ml-2 bg-white p-1 rounded shadow-sm text-xs">מחק</button>
+                        <div key={rule.id} className="flex justify-between items-start bg-white border border-purple-100 shadow-sm p-4 rounded-2xl text-sm text-slate-700 group hover:border-purple-200 transition-colors">
+                          <span className="whitespace-pre-wrap flex-1 font-medium leading-relaxed">{rule.rule_text}</span>
+                          <button onClick={() => deleteGlobalRule(rule.id)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 ml-2 bg-slate-50 px-3 py-1.5 rounded-lg font-medium transition-colors text-xs shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100">מחק</button>
                         </div>
                       ))
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     <textarea
                       value={newGlobalRule} onChange={(e) => setNewGlobalRule(e.target.value)}
-                      placeholder="הגדירי כלל שתקף תמיד..."
-                      className="flex-1 p-2 border rounded-lg focus:ring-2 focus:ring-[#ec4899] text-sm resize-none h-16"
+                      placeholder="הגדר כלל שתקף תמיד לכל צ'אט חדש..."
+                      className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-purple-500/30 outline-none text-sm resize-none h-14 transition-all"
                     />
-                    <button onClick={addGlobalRule} className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg text-sm font-medium">הוסף כלל</button>
+                    <button onClick={addGlobalRule} className="bg-slate-800 hover:bg-slate-700 text-white px-6 rounded-2xl text-sm font-bold shadow-sm transition-colors">הוספה</button>
                   </div>
                 </section>
 
                 <section>
-                  <h3 className="font-bold text-gray-800 mb-2 border-b pb-2">כללים מקומיים (לשיחה הנוכחית בלבד)</h3>
+                  <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
+                    <h3 className="font-bold text-slate-800 text-lg">כללים מקומיים</h3>
+                    <span className="text-xs font-medium bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">לשיחה הנוכחית בלבד</span>
+                  </div>
+                  
                   {!currentChatId ? (
-                    <p className="text-sm text-red-500 bg-red-50 p-3 rounded-lg">יש להתחיל שיחה חדשה כדי להגדיר לה כללים.</p>
+                    <div className="bg-amber-50 border border-amber-100 rounded-2xl p-6 text-center">
+                      <p className="text-sm text-amber-700 font-medium">יש להתחיל שיחה חדשה בחלון הראשי כדי להגדיר לה כללים ספציפיים.</p>
+                    </div>
                   ) : (
                     <>
-                      <div className="space-y-2 mb-4">
+                      <div className="space-y-3 mb-5">
                         {chatRules.length === 0 ? (
-                          <p className="text-sm text-gray-500 italic">אין כללים ספציפיים לשיחה זו.</p>
+                          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center">
+                            <p className="text-sm text-slate-400 font-medium">אין כללים ספציפיים לשיחה זו.</p>
+                          </div>
                         ) : (
                           chatRules.map(rule => (
-                            <div key={rule.id} className="flex justify-between items-start bg-pink-50 p-3 rounded-lg text-sm text-pink-900 border border-pink-100">
-                              <span className="whitespace-pre-wrap flex-1">{rule.rule_text}</span>
-                              <button onClick={() => deleteChatRule(rule.id)} className="text-red-500 hover:text-red-700 ml-2 bg-white p-1 rounded shadow-sm text-xs">מחק</button>
+                            <div key={rule.id} className="flex justify-between items-start bg-white border border-emerald-100 shadow-sm p-4 rounded-2xl text-sm text-slate-700 group hover:border-emerald-200 transition-colors">
+                              <span className="whitespace-pre-wrap flex-1 font-medium leading-relaxed">{rule.rule_text}</span>
+                              <button onClick={() => deleteChatRule(rule.id)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 ml-2 bg-slate-50 px-3 py-1.5 rounded-lg font-medium transition-colors text-xs shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100">מחק</button>
                             </div>
                           ))
                         )}
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-3">
                         <textarea
                           value={newChatRule} onChange={(e) => setNewChatRule(e.target.value)}
-                          placeholder="הגדירי כלל ספציפי לשיחה זו..."
-                          className="flex-1 p-2 border rounded-lg focus:ring-2 focus:ring-[#ec4899] text-sm resize-none h-16"
+                          placeholder="לדוגמה: בשיחה זו תעזור לי לכתוב קוד בפייתון בלבד..."
+                          className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-emerald-500/30 outline-none text-sm resize-none h-14 transition-all"
                         />
-                        <button onClick={addChatRule} className="bg-[#ec4899] hover:bg-[#db2777] text-white px-4 rounded-lg text-sm font-medium">הוסף לשיחה</button>
+                        <button onClick={addChatRule} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 rounded-2xl text-sm font-bold shadow-sm transition-colors">הוספה</button>
                       </div>
                     </>
                   )}
@@ -888,6 +1175,13 @@ export default function Home() {
           </div>
         )}
       </main>
+      {/* מדריך היכרות */}
+      {isTourOpen && (
+        <OnboardingTour
+          steps={TOUR_STEPS}
+          onDone={() => setIsTourOpen(false)}
+        />
+      )}
     </div>
   );
 }

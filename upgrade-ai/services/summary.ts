@@ -1,3 +1,12 @@
+// =============================================================================
+// services/summary.ts
+// פונקציות לקוח לשני נתיבי הסיכום:
+//   getChatSummary()       — סיכום מלא (שלבים, מושגים, תמצית) → /api/summary
+//   getQuickPromptSummary() — כותרת קצרה עד 7 מילים → /api/quick-summary
+//
+// DEV NOTE: שתי הפונקציות שולחות את ה-userApiKey בגוף הבקשה (POST),
+//           לא ב-URL — המפתח לעולם לא חשוף בכתובת.
+// =============================================================================
 import { ChatSummary } from '@/types/chatSummary';
 
 export class SummaryApiError extends Error {}
