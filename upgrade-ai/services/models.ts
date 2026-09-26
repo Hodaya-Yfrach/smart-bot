@@ -16,11 +16,10 @@
 import type { ModelInfo } from '@/types/models';
 
 export const MODELS: ModelInfo[] = [
-  { id: 'gemini-3.7-flash', displayName: 'Flash 3.7 — הכי חדש ומאוזן', description: 'שיחה כללית, ניתוח תמונות', capabilities: ['text', 'vision'], status: 'stable' },
-  { id: 'gemini-3.5-flash', displayName: 'Flash 3.5 — מהיר וחכם', description: 'שיחה כללית, ניתוח תמונות', capabilities: ['text', 'vision'], status: 'stable' },
-  { id: 'gemini-2.5-pro', displayName: 'Pro — חשיבה עמוקה', description: 'ניתוח מורכב ותמונות', capabilities: ['text', 'vision'], status: 'stable' },
-  { id: 'gemini-2.5-flash', displayName: 'Flash 2.5 — מהיר ומוכח', description: 'שיחה כללית, ניתוח תמונות', capabilities: ['text', 'vision'], status: 'stable' },
-  { id: 'gemini-2.5-flash-lite', displayName: 'Flash Lite — הכי קל וזול', description: 'משימות פשוטות', capabilities: ['text', 'vision'], status: 'stable' },
+  { id: 'gemini-3.8-flash', displayName: '⚡ מהיר וחדיש', description: 'המודל הכי עדכני, מתאים לשיחה יומיומית ולתמונות', capabilities: ['text', 'vision'], status: 'stable' },
+  { id: 'gemini-3.5-flash-lite', displayName: '🪶 מהיר במיוחד', description: 'הכי חסכוני ומהיר, טוב למשימות פשוטות', capabilities: ['text', 'vision'], status: 'stable' },
+  { id: 'gemini-3.1-pro-preview', displayName: '🧠 חכם ומעמיק', description: 'חשיבה מעמיקה, טוב לניתוחים מורכבים', capabilities: ['text', 'vision'], status: 'preview' },
+  { id: 'gemini-3.5-flash', displayName: '🧠⚡ חכם ומהיר', description: 'כמעט באותה רמה של החכם המעמיק, אבל מהיר יותר', capabilities: ['text', 'vision'], status: 'stable' },
 ];
 
 export const MODEL_ALIASES: Record<string, string> = {};
