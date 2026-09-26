@@ -28,12 +28,25 @@ interface DbMessage {
 }
 
 const AVAILABLE_MODELS = [
-  "gemini-3.6-flash",
-  "gemini-3.5-flash",
-  "gemini-3.1-pro-preview",
-  "gemini-3.1-flash-lite",
-  "gemini-3-flash-preview"
+  "gemini-flash-latest",      // מהיר, תמיד הגרסה העדכנית ביותר - ברירת מחדל
+  "gemini-3.8-flash",         // מהיר, גרסה עדכנית ומוגדרת
+  "gemini-3.1-flash-lite",    // מהיר וקל, גיבוי טוב תחת עומס
+  "gemini-pro-latest",        // חשיבה עמוקה (Pro) - תמיד הגרסה העדכנית ביותר
+  "gemini-3.1-pro-preview"    // חשיבה עמוקה (Pro) - גרסה preview נוספת
 ];
+
+// שמות ידידותיים למשתמש שיוצגים בתפריט הבחירה, במקום שם המודל הטכני של גוגל.
+// כל שינוי עתידי ב-AVAILABLE_MODELS צריך להתלוות בעדכון כאן.
+const MODEL_LABELS: Record<string, string> = {
+  "gemini-flash-latest": "⚡ מהיר (מומלץ - הכי עדכני)",
+  "gemini-3.8-flash": "⚡ מהיר (גרסה יציבה)",
+  "gemini-3.1-flash-lite": "🪶 מהיר וקל (חסכוני, לשאלות פשוטות)",
+  "gemini-pro-latest": "🧠 חשיבה עמוקה (מומלץ - הכי עדכני)",
+  "gemini-3.1-pro-preview": "🧠 חשיבה עמוקה (גרסה נוספת)",
+};
+
+// עוזר להצגת שם ידידותי בכל מקום שבו מוצג שם מודל למשתמש; נופל חזרה לשם הטכני אם חסר מיפוי
+const getModelLabel = (modelId: string) => MODEL_LABELS[modelId] || modelId;
 
 // כתובת המייל שאליה כפתור "תמיכה" יפנה - **חשוב: תחליפי כאן למייל שלך בפועל**
 const SUPPORT_EMAIL = '8564417@gmail.com';
@@ -101,6 +114,7 @@ export default function Home() {
 
   const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0]);
   const [disabledModels, setDisabledModels] = useState<string[]>([]);
+  const [isFallbackActive, setIsFallbackActive] = useState(false); // האם המודל הפעיל כרגע הוא גיבוי (עקב כשל במודל שנבחר)
   
   // 6. ניהול מפתח API נעילה/עריכה ב-DB
   const [userApiKey, setUserApiKey] = useState('');
@@ -151,6 +165,7 @@ export default function Home() {
           if (profile.preferred_model) {
             setSelectedModel(profile.preferred_model);
             setCurrentModelName(profile.preferred_model);
+            setIsFallbackActive(false);
           }
         }
 
@@ -347,6 +362,7 @@ export default function Home() {
     setMainMessages([]);
     setCurrentChatId(null);
     setCurrentModelName(AVAILABLE_MODELS[0]);
+    setIsFallbackActive(false);
   };
 
   const startNewChat = () => {
@@ -354,6 +370,7 @@ export default function Home() {
     setCurrentChatId(null);
     setChatRules([]);
     setCurrentModelName(selectedModel);
+    setIsFallbackActive(false);
   };
 
   // מעתיק את כתובת המייל ללוח - גיבוי למקרה שאין אפליקציית מייל מוגדרת כברירת מחדל
@@ -441,11 +458,13 @@ export default function Home() {
       }
 
       if (response.modelUsed !== selectedModel) {
-        setCurrentModelName(`${response.modelUsed} (גיבוי)`);
-        setToastMessage(`עקב עומס, הועברת אוטומטית למודל ${response.modelUsed}`);
+        setCurrentModelName(response.modelUsed);
+        setIsFallbackActive(true);
+        setToastMessage(`עקב עומס, הועברת אוטומטית למודל ${getModelLabel(response.modelUsed)}`);
         setTimeout(() => setToastMessage(null), 4000);
       } else {
         setCurrentModelName(selectedModel);
+        setIsFallbackActive(false);
       }
 
       if (response.failedModels && response.failedModels.length > 0) {
@@ -685,7 +704,7 @@ export default function Home() {
             </button>
           </div>
           <div className="w-full max-w-3xl text-xs text-gray-400 text-right px-2 flex justify-between">
-            <span>מודל פעיל כעת: <span className="font-medium text-gray-500">{currentModelName}</span></span>
+            <span>מודל פעיל כעת: <span className="font-medium text-gray-500">{getModelLabel(currentModelName)}{isFallbackActive ? ' (גיבוי)' : ''}</span></span>
             {isGuest && <span className="text-amber-600 font-medium">{guestLimitReached ? "נגמרו השאלות לאורח" : "שאלה 1 מתוך 1"}</span>}
           </div>
         </div>
@@ -756,7 +775,7 @@ export default function Home() {
                   >
                     {AVAILABLE_MODELS.map(model => (
                       <option key={model} value={model} disabled={disabledModels.includes(model)}>
-                        {model} {disabledModels.includes(model) ? '(עמוס כרגע - יתפנה בקרוב)' : ''}
+                        {MODEL_LABELS[model] || model} {disabledModels.includes(model) ? '(עמוס כרגע - יתפנה בקרוב)' : ''}
                       </option>
                     ))}
                   </select>

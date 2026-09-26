@@ -120,7 +120,9 @@ export async function POST(req: Request) {
         });
 
       } catch (err: any) {
-        console.error(`ניסיון כשל במודל ${modelName}:`, err.message);
+        // שומרים גם את קוד הסטטוס (429/403/500 וכו') כדי שהלקוח יוכל להציג סיבה מדויקת
+        const status = err?.status || err?.response?.status || null;
+        console.error(`ניסיון כשל במודל ${modelName} (status: ${status}):`, err.message);
         failedModels.push(modelName); // רושמים אותו כנכשל ועוברים מיד לבא בתור
       }
     }
